@@ -12,6 +12,8 @@ React-доска через HTML-импорты Bun, MCP-сервер на `@mod
 - `src/core/attendance.ts` – вердикт «идти на пару» по весам аудиторных активностей
 - `src/core/planner.ts` – today / week / digest
 - `src/core/workspace.ts` – рабочие папки задач для агента
+- `src/core/materials.ts` – зеркало курса в ~/study/<курс>/_course (недели, вложения через `/content/download-link`, силлабус, repo)
+- `src/core/agent.ts` – фоновый `claude -p` в папке задачи, открытие чата (claude://code/new, Terminal.app)
 - `src/mcp/server.ts`, `src/web/`, `src/cli.ts`, `src/sync.ts` (синхронизация и напоминания)
 - `rules/*.yaml` – правила курсов из силлабусов
 
@@ -19,6 +21,7 @@ React-доска через HTML-импорты Bun, MCP-сервер на `@mod
 
 - LMS только читаем. Никаких POST в LMS (сдача, late days) из кода.
 - Формула LMS: по активности `Σ(score+extraScore)/maxExercisesCount × weight`, шкала 10.
+- Имена файлов LMS приходят в NFD: в `download-link` передавай filename ровно как в API, иначе S3 вернёт 404.
 - `/deadlines` в LMS неполный: задачи без созданной карточки берём из `courses/:id/overview` (state `notCreated`).
 - Проверка: `bun run typecheck`, `bun cu course`.
 - Не используй длинное тире в текстах и коде.

@@ -121,6 +121,20 @@ function migrate(d: Database) {
       at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      dir TEXT NOT NULL,
+      pid INTEGER,
+      mode TEXT,
+      status TEXT NOT NULL,          -- running | done | failed
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      session_id TEXT,
+      summary TEXT,
+      cost_usd REAL
+    );
+
     CREATE TABLE IF NOT EXISTS plan_items (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,

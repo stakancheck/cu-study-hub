@@ -1,47 +1,19 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import TurndownService from "turndown";
 import { loadConfig, ROOT } from "../config";
 import { api } from "../connectors/lms/client";
 import { getDb } from "./db";
 import { adviseLateDays, gradeAll, lmsUrl, workItems } from "./engine";
+import { courseDir, slugify, syncCourseMaterials, td } from "./materials";
 import { AI_MODE_LABEL, ruleByLmsId } from "./rules";
 
-const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
-
-const slugify = (s: string) =>
-  s.toLowerCase().replace(/ё/g, "е").replace(/[^a-zа-я0-9]+/gi, "-").replace(/^-|-$/g, "").slice(0, 60);
-
-function materialToMd(m: any): string {
-  const name = m.name ? `### ${m.name}\n\n` : "";
-  if (m.discriminator === "markdown" || m.viewType === "markdown") {
-    let html = m.viewContent;
-    try { html = JSON.parse(m.viewContent).value; } catch {}
-    return name + td.turndown(html ?? "");
-  }
-  if (m.discriminator === "file" || m.content?.filename) return `${name}📎 Файл: ${m.content?.name ?? m.content?.filename ?? "вложение"} (скачай в LMS)`;
-  const est = m.estimation;
-  if (est) return `${name}Задание · макс. ${est.maxScore} · дедлайн ${est.deadline ?? "нет"} · активность «${est.activity?.name}»`;
-  return `${name}(материал типа ${m.discriminator ?? m.type}, см. LMS)`;
-}
-
-function gitRepos(md: string): string[] {
-  const urls = [...md.matchAll(/https?:\/\/git\.culab\.ru\/[^\s)"'\]]+/g)].map((m) => m[0]);
-  return [...new Set(urls.map((u) => u.split("/-/")[0].replace(/\.git$/, "")))];
-}
-
-async function tryClone(repo: string, dest: string): Promise<string> {
-  if (existsSync(dest)) {
-    const r = Bun.spawnSync(["git", "-C", dest, "pull", "--ff-only"], { timeout: 60_000 });
-    return r.exitCode === 0 ? "обновлён" : "уже есть, pull не удался";
-  }
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=10" };
-  const https = Bun.spawnSync(["git", "clone", "--depth", "1", `${repo}.git`, dest], { timeout: 90_000, env });
-  if (https.exitCode === 0) return "склонирован";
-  const sshUrl = repo.replace(/^https?:\/\/([^/]+)\//, "git@$1:") + ".git";
-  const ssh = Bun.spawnSync(["git", "clone", "--depth", "1", sshUrl, dest], { timeout: 90_000, env });
-  if (ssh.exitCode === 0) return "склонирован по SSH";
-  return `не склонирован (нужен доступ к git.culab.ru по токену или SSH): ${ssh.stderr.toString().trim().split("\n").pop()}`;
+/** The block «### Задание: <title>» of the theme file, with its attachment links. */
+function exerciseSection(themeMd: string, title: string): string | null {
+  const i = themeMd.indexOf(`### Задание: ${title}`);
+  if (i < 0) return null;
+  const rest = themeMd.slice(i);
+  const next = rest.slice(3).search(/\n#{2,3} /);
+  return next < 0 ? rest : rest.slice(0, next + 3);
 }
 
 const AI_INSTRUCTIONS: Record<string, string> = {
@@ -66,22 +38,25 @@ export async function createWorkspace(itemId: string, opts: { clone?: boolean } 
   const dir = join(cfg.workspaceRoot, rule.slug, slugify(it.title));
   mkdirSync(dir, { recursive: true });
 
-  const db = getDb();
-  const longreads = db.query("SELECT id, name FROM longreads WHERE theme_id = ? ORDER BY ord").all(it.themeId) as { id: number; name: string }[];
-  const mdParts: string[] = [];
-  for (const l of longreads) {
-    const mats = await api.materials(l.id).catch(() => ({ items: [] as any[] }));
-    mdParts.push(`## ${l.name}\n\n${(mats?.items ?? []).sort((a, b) => a.order - b.order).map(materialToMd).join("\n\n")}`);
-  }
-  const materials = mdParts.join("\n\n---\n\n");
+  // Whole course mirror first: every week, attachments, syllabus, repo. Cheap on re-runs.
+  const mat = await syncCourseMaterials(it.courseId, { clone: opts.clone });
+  const theme = getDb().query("SELECT ord, name FROM themes WHERE id = ?").get(it.themeId) as { ord: number; name: string };
+  const themeFile = `${String(theme.ord).padStart(2, "0")}-${slugify(theme.name)}.md`;
+  const themeMd = existsSync(join(mat.dir, themeFile)) ? readFileSync(join(mat.dir, themeFile), "utf8") : "";
+  // Links inside _course are relative to it; from the task folder they live one level up.
+  const relink = (md: string) => md.replace(/\](\(<?)(attachments\/|repo\/)/g, "]$1../_course/$2");
+  const section = exerciseSection(themeMd, it.title);
   const detail = it.taskId ? await api.task(it.taskId).catch(() => null) : null;
-  const statement = detail?.exercise?.viewContent ? td.turndown(detail.exercise.viewContent) : null;
-
-  const repos = gitRepos(materials);
-  const cloneNotes: string[] = [];
-  if (opts.clone !== false) {
-    for (const r of repos) cloneNotes.push(`- ${r}: ${await tryClone(r, join(cfg.workspaceRoot, rule.slug, "_repo", r.split("/").pop()!))}`);
-  }
+  const lmsStatement = detail?.exercise?.viewContent ? td.turndown(detail.exercise.viewContent) : null;
+  // No text or file on the task itself: the statement is usually inside the week's PDFs (лонгрид, семинар).
+  const sectionHasBody = !!section && (section.includes("📎") || section.split("\n").filter((l) => l.trim()).length > 2);
+  const weekFiles = themeMd.split("\n").filter((l) => l.startsWith("📎"));
+  const hint = !lmsStatement && !sectionHasBody && weekFiles.length
+    ? `В LMS у задания нет текста и вложений. Условие, скорее всего, в файлах этой недели (PDF читай инструментом Read):\n\n${relink(weekFiles.join("\n"))}`
+    : "";
+  const statement = [lmsStatement, section && relink(section), hint].filter(Boolean).join("\n\n");
+  const repos = mat.repos;
+  const cloneNotes = mat.cloneNotes;
 
   const ld = adviseLateDays(it);
   const link = lmsUrl(it.courseId, it.themeId, it.longreadId);
@@ -106,7 +81,7 @@ export async function createWorkspace(itemId: string, opts: { clone?: boolean } 
 Блокеры: ${g.blockers.map((b) => `${b.label}: ${b.status} (${b.detail})`).join("; ") || "нет"}.
 
 ## Условие
-${statement ?? "Текст условия LMS не отдаёт отдельно: смотри MATERIALS.md (раздел «Домашнее задание») и репозиторий курса."}
+${statement || "Отдельного текста условия в LMS нет: смотри MATERIALS.md (раздел «Домашнее задание»), вложения и репозиторий курса."}
 
 ## Late days
 ${ld.reasoning}
@@ -117,8 +92,20 @@ ${rule.ai_policy.note}
 
   const claudeMd = `# Рабочая папка: ${it.title}
 
-Это задание по курсу «${rule.title}» в Центральном университете. Контекст: BRIEF.md (условие, дедлайн,
-вклад в оценку), MATERIALS.md (материалы темы из LMS)${repos.length ? `, ../_repo (репозиторий курса)` : ""}.
+Это задание по курсу «${rule.title}» в Центральном университете.
+
+## Где что лежит
+- BRIEF.md: условие, дедлайн, вклад в оценку, late days, политика ИИ.
+- MATERIALS.md: материалы темы этой задачи (неделя «${it.theme}»).
+- ../_course/: ВЕСЬ курс. README.md (оглавление и ссылки), файл на каждую неделю, attachments/ (PDF, слайды,
+  условия заданий), SYLLABUS.md (система оценивания), repo/ (репозиторий курса, если есть доступ).
+  Читай прошлые недели, когда задание опирается на пройденное. Папку пересобирает синхронизация, не правь её.
+- ../COURSE_NOTES.md: правила студента для этого курса (стиль кода, рамки по неделям, git, защита). Если файл есть,
+  он ВАЖНЕЕ общих инструкций ниже, кроме запретов политики ИИ.
+- ../HISTORY.md: прошлые работы студента по курсу (решения, презентации, отчёты) с оценками. Используй как образец
+  стиля и формата, но не копируй старые решения в новое задание.
+- ~/study/_templates/: общие шаблоны ЦУ (например, шаблон презентаций для упаковки проектов).
+${repos.length ? `- Репозитории курса: ${repos.join(", ")}\n` : ""}
 
 ## Режим работы агента: ${rule.ai_policy.mode}
 ${AI_INSTRUCTIONS[rule.ai_policy.mode]}
@@ -126,7 +113,7 @@ ${AI_INSTRUCTIONS[rule.ai_policy.mode]}
 Цитата из силлабуса: «${rule.ai_policy.note}»
 
 ## Инструменты
-MCP-сервер cu-hub: \`task_context\`, \`course_grades\`, \`late_days_advice\`, \`card_move\`.
+MCP-сервер cu-hub: \`task_context\`, \`course_materials\`, \`course_grades\`, \`late_days_advice\`, \`card_move\`.
 Сдавать работу и брать late days в LMS студент делает сам; можно подготовить всё для сдачи.
 `;
 
@@ -137,7 +124,7 @@ MCP-сервер cu-hub: \`task_context\`, \`course_grades\`, \`late_days_advice
     ...g.links,
   ];
   const linksMd = courseLinks.length ? `Ссылки курса:\n${courseLinks.map((l) => `- [${l.label}](${l.url})`).join("\n")}\n\n` : "";
-  writeFileSync(join(dir, "MATERIALS.md"), `# Материалы темы «${it.theme}»\n\n${linksMd}${repos.length ? `Репозитории:\n${cloneNotes.join("\n") || repos.map((r) => `- ${r}`).join("\n")}\n\n` : ""}${materials}`);
+  writeFileSync(join(dir, "MATERIALS.md"), `# Материалы темы «${it.theme}»\n\nВесь курс: ../_course/README.md\n\n${linksMd}${repos.length ? `Репозитории:\n${cloneNotes.join("\n")}\n\n` : ""}${relink(themeMd.replace(/^# .*\n/, ""))}`);
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd);
   // Make the folder a self-contained Claude Code project: MCP + /defend.
   writeFileSync(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": { command: "bun", args: [join(ROOT, "src/mcp/server.ts")] } } }, null, 2));
@@ -147,5 +134,5 @@ MCP-сервер cu-hub: \`task_context\`, \`course_grades\`, \`late_days_advice
     if (existsSync(src)) copyFileSync(src, join(dir, ".claude/commands", f));
   }
   writeFileSync(join(dir, ".cu-task.json"), JSON.stringify({ id: it.id, courseId: it.courseId, taskId: it.taskId, exerciseId: it.exerciseId }, null, 2));
-  return { dir, repos, cloneNotes, aiMode: rule.ai_policy.mode };
+  return { dir, repos, cloneNotes, aiMode: rule.ai_policy.mode, courseDir: courseDir(it.courseId), attachments: mat.attachments, errors: mat.errors };
 }

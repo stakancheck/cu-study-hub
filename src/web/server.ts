@@ -7,8 +7,13 @@ import { getDb, getMeta } from "../core/db";
 import { gradeAll, whatIf } from "../core/engine";
 import { today, week } from "../core/planner";
 import { addPlanItem, deletePlanItem, planItems, semester, weekOf } from "../core/plan";
-import { baseRules, loadRules, ruleBySlug } from "../core/rules";
+import { baseRules, loadRules, ruleByLmsId, ruleBySlug } from "../core/rules";
 import { createWorkspace } from "../core/workspace";
+import { latestRun, openChat, refreshRuns, startDraft } from "../core/agent";
+import { courseDir, slugify, syncCourseMaterials, writeCourseRoot } from "../core/materials";
+import { existsSync, readdirSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
+import { workItems } from "../core/engine";
 import { runReminders, syncAll } from "../sync";
 
 const cfg = loadConfig();
@@ -25,9 +30,14 @@ function coursePage(slug: string) {
   const rule = ruleBySlug(slug);
   if (!rule) return null;
   const g = gradeAll().find((x) => x.id === rule.lms_id);
-  const themes = getDb()
+  const base = courseDir(rule.lms_id);
+  const themes = (getDb()
     .query("SELECT id, name, ord, publish_date FROM themes WHERE course_id = ? ORDER BY ord")
-    .all(rule.lms_id);
+    .all(rule.lms_id) as any[]).map((t) => {
+      const stem = `${String(t.ord).padStart(2, "0")}-${slugify(t.name)}`;
+      const file = join(base, `${stem}.md`), attDir = join(base, "attachments", stem);
+      return { ...t, file, attDir, hasFile: existsSync(file), attCount: existsSync(attDir) ? readdirSync(attDir).filter((f) => !f.startsWith(".")).length : 0 };
+    });
   const { cards } = buildBoard();
   return {
     grade: g,
@@ -35,6 +45,7 @@ function coursePage(slug: string) {
     themes,
     cards: cards.filter((c) => c.courseId === rule.lms_id),
     settings: courseSettings(rule.lms_id),
+    materials: { dir: courseDir(rule.lms_id), syncedAt: getMeta(`materialsSyncedAt:${rule.lms_id}`) },
   };
 }
 
@@ -47,6 +58,15 @@ function courseSettings(id: number) {
     defaults: { title: b.title, short: b.short, color: b.color, syllabusUrl: row?.syllabus_url ?? null, timeUrl: row?.time_url ?? null, calendarMatch: b.calendar?.match ?? [] },
     override: loadConfig().courses[String(id)] ?? {},
   };
+}
+
+/** Opens a path in Finder (or the default app for files); only inside the study folder. */
+function openInFinder(path: string, reveal = false) {
+  const root = resolve(loadConfig().workspaceRoot);
+  const p = resolve(path);
+  if (p !== root && !p.startsWith(root + sep)) throw new Error("Можно открывать только то, что лежит в папке учёбы");
+  if (!existsSync(p)) throw new Error("Такой папки ещё нет: обнови материалы курса");
+  Bun.spawn(reveal ? ["open", "-R", p] : ["open", p]);
 }
 
 function normCaldav(c: Partial<CaldavConfig>): CaldavConfig {
@@ -120,6 +140,54 @@ const server = Bun.serve({
         Object.assign(courses, cleanCourses({ [id]: await req.json() }));
         saveConfig({ courses });
         return ok(courseSettings(rule.lms_id));
+      },
+    },
+    "/api/agent/draft": {
+      POST: async (req) => {
+        try {
+          const { id } = await req.json();
+          const run = await startDraft(id);
+          moveCard(id, "doing");
+          return ok(run);
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+    },
+    "/api/agent/run/:id": (req) => ok(latestRun(decodeURIComponent(req.params.id))),
+    "/api/chat": {
+      POST: async (req) => {
+        try {
+          const { id, course, target, resume } = await req.json();
+          if (course) {
+            const rule = ruleBySlug(course);
+            if (!rule) throw new Error("Курс не найден");
+            const root = writeCourseRoot(rule.lms_id);
+            openChat(root, target, { prompt: `Курс «${rule.title}». Прочитай CLAUDE.md и _course/README.md и коротко скажи, что сейчас важно по курсу.` });
+            return ok({ dir: root });
+          }
+          const run = latestRun(id);
+          const it = workItems().find((i) => i.id === id);
+          const dir = run?.dir ?? (await createWorkspace(id)).dir;
+          openChat(dir, target, {
+            resume: resume ? run?.session_id : null,
+            prompt: it ? `Задача «${it.title}». Прочитай CLAUDE.md, BRIEF.md и MATERIALS.md, кратко скажи, что сдать и к какому сроку, и предложи план.` : undefined,
+          });
+          return ok({ dir });
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+    },
+    "/api/course/:slug/materials": {
+      POST: async (req) => {
+        const rule = ruleBySlug(req.params.slug);
+        if (!rule) return fail(new Error("not found"), 404);
+        try {
+          return ok(await syncCourseMaterials(rule.lms_id));
+        } catch (e) {
+          return fail(e);
+        }
       },
     },
     "/api/settings": {
@@ -234,9 +302,28 @@ const server = Bun.serve({
     },
     "/api/open": {
       POST: async (req) => {
-        const { path } = await req.json();
-        if (typeof path === "string" && path.startsWith(loadConfig().workspaceRoot)) Bun.spawn(["open", path]);
-        return ok();
+        const { path, reveal } = await req.json();
+        try {
+          openInFinder(String(path ?? ""), !!reveal);
+          return ok();
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+    },
+    "/api/open-task": {
+      POST: async (req) => {
+        try {
+          const { id } = await req.json();
+          const it = workItems().find((i) => i.id === id);
+          if (!it) throw new Error("Задача не найдена");
+          const dir = join(loadConfig().workspaceRoot, ruleByLmsId(it.courseId)!.slug, slugify(it.title));
+          if (!existsSync(dir)) await createWorkspace(id);
+          openInFinder(dir);
+          return ok({ dir });
+        } catch (e) {
+          return fail(e, 400);
+        }
       },
     },
   },
@@ -249,6 +336,9 @@ console.log(`Учебный штаб: http://localhost:${server.port}`);
 const syncEveryMs = cfg.syncIntervalMin * 60_000;
 const last = Date.parse(getMeta("lmsSyncedAt") ?? "0");
 setTimeout(() => { doSync(); setInterval(doSync, syncEveryMs); }, Math.max(0, last + syncEveryMs - Date.now()));
-const tick = () => { try { runReminders(); } catch (e) { console.error("reminders:", e); } };
+const tick = () => {
+  try { runReminders(); } catch (e) { console.error("reminders:", e); }
+  try { refreshRuns(); } catch (e) { console.error("agent runs:", e); }
+};
 tick();
 setInterval(tick, 2 * 60_000);

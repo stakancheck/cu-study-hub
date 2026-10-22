@@ -50,6 +50,13 @@ export interface HubConfig {
   caldav?: CaldavConfig;
   reminders: { beforeClassMin: number; digestAt: string; weeklyReviewAt: string };
   courses: Record<string, CourseOverride>;
+  agent?: {
+    /** path to the claude CLI; autodetected when empty */
+    claudeBin?: string;
+    /** tools the background draft agent may use without asking */
+    allowedTools?: string[];
+    maxTurns?: number;
+  };
 }
 
 const DEFAULTS: HubConfig = {

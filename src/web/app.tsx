@@ -25,6 +25,8 @@ interface State {
   meta: { week: number | null; weeks: number; lateDaysBalance: number | null; lmsSyncedAt: string | null; calSyncedAt: string | null; lastSync: { errors: string[] } | null; syncing: boolean; calendarConfigured: boolean };
 }
 
+interface AgentRun { id: string; card_id: string; dir: string; status: "running" | "done" | "failed"; started_at: string; finished_at: string | null; session_id: string | null; summary: string | null; cost_usd: number | null; mode: string }
+
 // ---------- helpers ----------
 const api = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
   const res = await fetch(path, { ...init, headers: { "content-type": "application/json" }, body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body });
@@ -32,6 +34,7 @@ const api = async <T,>(path: string, init?: RequestInit & { json?: unknown }): P
   if (!res.ok) throw new Error(data.error ?? res.statusText);
   return data;
 };
+const minsSince = (iso: string) => { const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return m < 1 ? "только что" : `${m} мин`; };
 const f2 = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 const time = (iso: string) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 const ago = (iso: string | null) => {
@@ -354,7 +357,26 @@ function KCard({ c, onOpen, onDrag, dragging }: { c: Card; onOpen: () => void; o
 // ---------- Peek ----------
 function Peek({ card, grade, close, reload, flash, balance }: { card: Card; grade?: Grade; close: () => void; reload: () => void; flash: (m: string) => void; balance: number | null }) {
   const [notes, setNotes] = useState(card.notes);
-  const [ws, setWs] = useState<{ dir: string; cloneNotes: string[]; aiMode: string } | null>(null);
+  const [ws, setWs] = useState<{ dir: string; cloneNotes: string[]; aiMode: string; attachments?: number } | null>(null);
+  const [run, setRun] = useState<AgentRun | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+  const loadRun = useCallback(() => card.kind === "lms" ? api<AgentRun | null>(`/api/agent/run/${encodeURIComponent(card.id)}`).then(setRun).catch(() => {}) : Promise.resolve(), [card.id, card.kind]);
+  useEffect(() => { setRun(null); loadRun(); }, [loadRun]);
+  useEffect(() => {
+    if (run?.status !== "running") return;
+    const t = setInterval(loadRun, 5000);
+    return () => clearInterval(t);
+  }, [run?.status, loadRun]);
+  const draft = async () => {
+    setBusy(true);
+    try { setRun(await api<AgentRun>("/api/agent/draft", { method: "POST", json: { id: card.id } })); flash("Агент запущен в фоне, по готовности придёт уведомление"); reload(); }
+    catch (e) { flash((e as Error).message); } finally { setBusy(false); }
+  };
+  const chat = async (target: "app" | "terminal", resume = false) => {
+    setOpening(target);
+    try { await api("/api/chat", { method: "POST", json: { id: card.id, target, resume } }); flash(target === "app" ? "Открываю в Claude…" : "Открываю Терминал…"); }
+    catch (e) { flash((e as Error).message); } finally { setOpening(null); }
+  };
   const [busy, setBusy] = useState(false);
   useEffect(() => { setNotes(card.notes); setWs(null); }, [card.id]);
   useEffect(() => { const f = (e: KeyboardEvent) => e.key === "Escape" && close(); addEventListener("keydown", f); return () => removeEventListener("keydown", f); }, [close]);
@@ -415,17 +437,49 @@ function Peek({ card, grade, close, reload, flash, balance }: { card: Card; grad
           <>
             <h3 className="h">Работа с агентом</h3>
             <div className="actions">
-              <button className="btn primary" onClick={workspace} disabled={busy}>{busy ? "Собираю…" : "📁 Создать рабочую папку"}</button>
-              <button className="btn outline" onClick={() => copy(`/do ${card.id}`)}>Скопировать /do {card.id}</button>
+              <button className="btn primary" onClick={draft} disabled={busy || run?.status === "running"}>
+                {run?.status === "running" ? <><span className="spin">⟳</span> Агент работает · {minsSince(run.started_at)}</> : card.aiMode === "tutor_only" ? "✨ План и вопросы агентом" : "✨ Черновик агентом"}
+              </button>
+              <button className="btn outline" onClick={() => chat("app")} disabled={!!opening}>💬 Открыть в Claude</button>
+              <button className="btn outline" onClick={() => chat("terminal")} disabled={!!opening}>⌨️ В терминале</button>
+              <button className="btn outline" onClick={() => api("/api/open-task", { method: "POST", json: { id: card.id } }).catch((e) => flash(e.message))}>📁 В Finder</button>
             </div>
-            {ws && <>
-              <pre className="code">{cmd}</pre>
-              <div className="actions">
-                <button className="btn outline" onClick={() => copy(cmd)}>Скопировать команду</button>
-                <button className="btn outline" onClick={() => api("/api/open", { method: "POST", json: { path: ws.dir } })}>Открыть в Finder</button>
+            <div className="muted" style={{ fontSize: 12, marginTop: -8, marginBottom: 10 }}>
+              {card.aiMode === "tutor_only"
+                ? "По политике курса агент не пишет решение: сделает PLAN.md со структурой, наводящими вопросами и чек-листом."
+                : card.aiMode === "assist"
+                  ? "Агент сделает черновик, EXPLAIN.md с объяснением каждой части и DEFENSE.md с вопросами к защите."
+                  : "Агент сделает черновик и DEFENSE.md с вопросами к защите."}
+              {" "}Папка задачи видит весь курс: ../_course.
+            </div>
+            {run && run.status !== "running" && (
+              <div className={`callout ${run.status === "failed" ? "red" : "blue"}`} style={{ marginBottom: 10 }}>
+                <span className="ci">{run.status === "done" ? "✨" : "⚠️"}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <b>{run.status === "done" ? "Черновик готов" : "Агент не справился"}</b> <span className="muted">· {new Date(run.finished_at ?? run.started_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}{run.cost_usd != null ? ` · $${run.cost_usd.toFixed(2)}` : ""}</span>
+                  <div className="agent-summary">{run.summary}</div>
+                  <div className="actions" style={{ margin: "8px 0 0" }}>
+                    {run.session_id && <button className="btn outline" onClick={() => chat("terminal", true)}>⌨️ Продолжить эту сессию в терминале</button>}
+                    <button className="btn outline" onClick={() => api("/api/open", { method: "POST", json: { path: run.dir } })}>📁 Открыть папку</button>
+                  </div>
+                </div>
               </div>
-              {ws.cloneNotes.length > 0 && <div className="muted">{ws.cloneNotes.join(" · ")}</div>}
-            </>}
+            )}
+            <details className="more">
+              <summary>Папка и команды</summary>
+              <div className="actions">
+                <button className="btn outline" onClick={workspace} disabled={busy}>{busy ? "Собираю…" : "📁 Создать или обновить папку"}</button>
+                <button className="btn outline" onClick={() => copy(`/do ${card.id}`)}>Скопировать /do {card.id}</button>
+              </div>
+              {ws && <>
+                <pre className="code">{cmd}</pre>
+                <div className="actions">
+                  <button className="btn outline" onClick={() => copy(cmd)}>Скопировать команду</button>
+                  <button className="btn outline" onClick={() => api("/api/open", { method: "POST", json: { path: ws.dir } })}>Открыть в Finder</button>
+                </div>
+                {ws.cloneNotes.length > 0 && <div className="muted">{ws.cloneNotes.join(" · ")}</div>}
+              </>}
+            </details>
           </>
         )}
 
@@ -512,6 +566,13 @@ function Course({ slug, s, open, reload, flash }: { slug: string; s: State; open
   };
   const startLinks = () => { setDraft({ ...settings!.override, links: [...(settings!.override.links ?? [])] }); setEditLinks(true); };
   const saveLinks = async () => { await save({ syllabusUrl: draft.syllabusUrl ?? "", timeUrl: draft.timeUrl ?? "", links: (draft.links ?? []).filter((l) => l.url.trim()) }); setEditLinks(false); };
+  const [busyMat, setBusyMat] = useState(false);
+  const syncMaterials = async () => {
+    setBusyMat(true);
+    try { const r = await api<{ weeks: number; attachments: number; errors: string[] }>(`/api/course/${slug}/materials`, { method: "POST" }); flash(`Материалы обновлены: недель ${r.weeks}, файлов ${r.attachments}${r.errors.length ? `, ошибок ${r.errors.length}` : ""}`); reload(); }
+    catch (e) { flash((e as Error).message); } finally { setBusyMat(false); }
+  };
+  const courseChat = (target: "app" | "terminal") => api("/api/chat", { method: "POST", json: { course: slug, target } }).then(() => flash(target === "app" ? "Открываю в Claude…" : "Открываю Терминал…")).catch((e) => flash(e.message));
   const resetAll = async () => { await api(`/api/course/${slug}/settings`, { method: "PUT", json: {} }); flash("Настройки курса сброшены"); setEditLinks(false); reload(); };
   const g: Grade | undefined = data?.grade;
   useEffect(() => {
@@ -576,6 +637,15 @@ function Course({ slug, s, open, reload, flash }: { slug: string; s: State; open
         )}
         <Progress g={g} />
 
+        <div className="course-tools">
+          <span className="muted">📚 Материалы курса {data.materials?.syncedAt ? `обновлены ${ago(data.materials.syncedAt)}` : "ещё не скачаны"}</span>
+          <span style={{ flex: 1 }} />
+          <button className="btn outline" disabled={busyMat} onClick={syncMaterials}>{busyMat ? <><span className="spin">⟳</span> Скачиваю…</> : "⟳ Обновить материалы"}</button>
+          <button className="btn outline" onClick={() => api("/api/open", { method: "POST", json: { path: data.materials.dir } }).catch((e) => flash(e.message))}>📁 Папка курса</button>
+          <button className="btn outline" onClick={() => courseChat("app")}>💬 Чат по курсу</button>
+          <button className="btn outline" onClick={() => courseChat("terminal")}>⌨️ В терминале</button>
+        </div>
+
         {g.warnings.map((w, i) => <div key={i} className="callout" style={{ marginTop: 10 }}><span className="ci">ℹ️</span><div>{w}</div></div>)}
 
         <h2 className="h">Блокеры</h2>
@@ -626,7 +696,17 @@ function Course({ slug, s, open, reload, flash }: { slug: string; s: State; open
 
         <h2 className="h">Программа</h2>
         <div className="list">
-          {data.themes.map((t: any) => <div className="row" key={t.id}><span className="title">{t.name}</span><span className="muted">{t.publish_date ? new Date(t.publish_date).toLocaleDateString("ru-RU") : ""}</span></div>)}
+          {data.themes.map((t: any) => {
+            const openPath = (path: string) => api("/api/open", { method: "POST", json: { path } }).catch((e) => flash(e.message));
+            return (
+              <div className="row" key={t.id}>
+                <span className="title">{t.name}<small>{t.publish_date ? new Date(t.publish_date).toLocaleDateString("ru-RU") : ""}{t.attCount ? ` · файлов: ${t.attCount}` : ""}</small></span>
+                {t.hasFile && <button className="btn" title="Открыть конспект недели (markdown)" onClick={() => openPath(t.file)}>📄 Неделя</button>}
+                {t.attCount > 0 && <button className="btn" title="Папка с лекциями, презентациями и условиями" onClick={() => openPath(t.attDir)}>📁 Файлы</button>}
+              </div>
+            );
+          })}
+          {!data.themes.some((t: any) => t.hasFile) && <div className="row muted">Материалы ещё не скачаны: нажми «⟳ Обновить материалы» выше.</div>}
         </div>
       </div>
     </>
@@ -794,7 +874,15 @@ function Plan({ courses, flash }: { courses: Grade[]; flash: (m: string) => void
   const [sel, setSel] = useState<PlanItem | null>(null);
   const [form, setForm] = useState<{ title: string; kind: string; courseId: string; from: string; to: string; note: string } | null>(null);
   const [drag, setDrag] = useState<{ a: string; b: string } | null>(null);
-  const [hover, setHover] = useState<{ day: string; x: number; y: number } | null>(null);
+  const [hover, setHoverRaw] = useState<{ day: string; x: number; y: number } | null>(null);
+  // Closing is delayed so the pointer can travel from the day into the card (to scroll it or read it).
+  const closeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepOpen = () => { if (closeTimer.current) clearTimeout(closeTimer.current); };
+  const setHover = (h: { day: string; x: number; y: number } | null) => {
+    keepOpen();
+    if (h) setHoverRaw(h);
+    else closeTimer.current = setTimeout(() => setHoverRaw(null), 180);
+  };
   const load = () => api<any>("/api/plan?from=2026-06-01&to=2027-09-30").then(setData);
   useEffect(() => { load(); }, []);
   useEffect(() => { try { localStorage.setItem("plan.view", view); } catch {} }, [view]);
@@ -900,7 +988,12 @@ function Plan({ courses, flash }: { courses: Grade[]; flash: (m: string) => void
                       onBlur={() => setHover(null)}
                       onClick={() => { setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); setView("month"); }}>
                       {d.getDate()}
-                      {course.length > 0 && <i className={`ydot c-${colorOf(course[0])}`} />}
+                      {course.length > 0 && (
+                        <span className="ydots" aria-label={`отметок: ${course.length}`}>
+                          {course.slice(0, 4).map((i) => <i key={i.id} className={`ydot c-${colorOf(i)} ${i.precision === "week" ? "approx" : ""}`} />)}
+                          {course.length > 4 && <b className="ymore">+</b>}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -926,16 +1019,15 @@ function Plan({ courses, flash }: { courses: Grade[]; flash: (m: string) => void
     const top0 = hover.y - 28; // top edge of the hovered day
     const below = innerHeight - hover.y >= top0;
     const maxH = (below ? innerHeight - hover.y : top0) - 16;
-    const MAX = 6;
-    const shown = items.slice(0, MAX);
     return (
-      <div className="ypop" style={{ left, width: W, maxHeight: maxH, ...(below ? { top: hover.y + 6 } : { bottom: innerHeight - top0 + 6 }) }} role="tooltip">
+      <div className="ypop" style={{ left, width: W, maxHeight: Math.max(maxH, 160), ...(below ? { top: hover.y + 4 } : { bottom: innerHeight - top0 + 4 }) }}
+        role="dialog" aria-label="Отметки дня" onMouseEnter={keepOpen} onMouseLeave={() => setHover(null)}>
         <div className="ypop-h">
           <b>{d.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</b>
           {wn ? <span className="muted">неделя {wn}</span> : null}
         </div>
         {periods.map((p) => <div key={p.id} className={`ypop-period tint-${PKIND[p.kind]?.color ?? "gray"}`}>{PKIND[p.kind]?.icon} {p.title} <span className="muted">· {fmtD(p.from)}{p.to !== p.from ? `–${fmtD(p.to)}` : ""}</span></div>)}
-        {shown.map((i) => (
+        {items.map((i) => (
           <div key={i.id} className="ypop-item">
             <span>{PKIND[i.kind]?.icon}</span>
             <div style={{ minWidth: 0 }}>
@@ -948,7 +1040,7 @@ function Plan({ courses, flash }: { courses: Grade[]; flash: (m: string) => void
             </div>
           </div>
         ))}
-        {items.length > MAX && <div className="muted">+ ещё {items.length - MAX}: кликни, чтобы открыть месяц</div>}
+        <button className="ypop-open" onClick={() => { setHoverRaw(null); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); setView("month"); }}>Открыть {MONTHS[d.getMonth()].toLowerCase()} →</button>
         {!all.length && <div className="muted">Ничего не запланировано</div>}
       </div>
     );

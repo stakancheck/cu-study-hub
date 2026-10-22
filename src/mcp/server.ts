@@ -9,6 +9,7 @@ import { adviseLateDays, findItem, gradeAll, recoverable, whatIf, workItems } fr
 import { digestMarkdown, today, week } from "../core/planner";
 import { loadRules, ruleBySlug } from "../core/rules";
 import { createWorkspace } from "../core/workspace";
+import { readCourseMaterials } from "../core/materials";
 import { planItems, semester, weekOf, ymd } from "../core/plan";
 import { syncAll } from "../sync";
 
@@ -166,6 +167,15 @@ server.registerTool("workspace_create", {
   const res = await createWorkspace(it.id, { clone });
   moveCard(it.id, "doing");
   return json(res);
+});
+
+server.registerTool("course_materials", {
+  description: "Материалы курса из локального зеркала LMS (~/study/<курс>/_course): без week возвращает оглавление и ссылки, с week (номер недели, часть названия темы или «силлабус») возвращает полный текст недели с путями к вложениям.",
+  inputSchema: { course: z.string().describe(courseHint), week: z.string().optional() },
+}, async ({ course, week }) => {
+  const rule = ruleBySlug(course);
+  if (!rule) return text(`Курс «${course}» не найден. ${courseHint}`);
+  return text(readCourseMaterials(rule.lms_id, week));
 });
 
 server.registerTool("study_plan", {

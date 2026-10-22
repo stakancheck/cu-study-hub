@@ -23,6 +23,9 @@ const HELP = `Учебный штаб ЦУ
   cu week               план недели
   cu course [курс]      оценки по курсу (без аргумента: все)
   cu do <задача>        создать рабочую папку для агента
+  cu draft <задача>        черновик агентом в фоне (claude -p в рабочей папке)
+  cu chat <задача> [--terminal]  открыть чат по задаче в Claude или в Терминале
+  cu materials [курс]      обновить зеркало материалов курса (~/study/<курс>/_course)
   cu serve              доска на localhost + фоновая синхронизация и напоминания
   cu calendars          показать календари CalDAV (для настройки)
   cu install            автозапуск демона через launchd
@@ -76,6 +79,34 @@ switch (cmd) {
     if (!it) { console.error("Не нашёл задачу"); process.exit(1); }
     const res = await createWorkspace(it.id);
     console.log(`Папка: ${res.dir}\nРежим ИИ: ${res.aiMode}\n${res.cloneNotes.join("\n")}\n\ncd "${res.dir}" && claude`);
+    break;
+  }
+  case "draft": {
+    const it = findItem(args.join(" "));
+    if (!it) { console.error("Не нашёл задачу"); process.exit(1); }
+    const { startDraft } = await import("./core/agent");
+    const run = await startDraft(it.id);
+    console.log(`Агент запущен (pid ${run.pid}) в ${run.dir}\nКогда закончит, придёт уведомление. Лог: ${run.dir}/.cu-agent/`);
+    break;
+  }
+  case "chat": {
+    const terminal = args.includes("--terminal");
+    const it = findItem(args.filter((a) => a !== "--terminal").join(" "));
+    if (!it) { console.error("Не нашёл задачу"); process.exit(1); }
+    const { openChat, latestRun } = await import("./core/agent");
+    const dir = latestRun(it.id)?.dir ?? (await createWorkspace(it.id)).dir;
+    openChat(dir, terminal ? "terminal" : "app", { prompt: `Задача «${it.title}». Прочитай CLAUDE.md, BRIEF.md и MATERIALS.md и предложи план.` });
+    console.log(`Открыл чат в ${dir}`);
+    break;
+  }
+  case "materials": {
+    const { syncCourseMaterials } = await import("./core/materials");
+    const sel = args[0] ? [ruleBySlug(args.join(" "))].filter(Boolean) : gradeAll().map((g) => ruleBySlug(String(g.id)));
+    for (const r of sel) {
+      if (!r || r.graded === false) continue;
+      const res = await syncCourseMaterials(r.lms_id);
+      console.log(`${r.short}: ${res.weeks} недель, ${res.attachments} файлов → ${res.dir}${res.errors.length ? `, ошибок ${res.errors.length}` : ""}`);
+    }
     break;
   }
   case "serve":

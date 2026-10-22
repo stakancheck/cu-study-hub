@@ -7,10 +7,11 @@ import { AuthError } from "./connectors/lms/session";
 import { classes } from "./core/attendance";
 import { getDb, setMeta } from "./core/db";
 import { gradeAll, openItems, workItems } from "./core/engine";
+import { syncAllMaterials } from "./core/materials";
 import { notify, notifyOnce } from "./core/notify";
 import { digestMarkdown, today } from "./core/planner";
 
-export interface SyncReport { lms?: unknown; calendar?: unknown; syllabus?: unknown; errors: string[] }
+export interface SyncReport { lms?: unknown; calendar?: unknown; syllabus?: unknown; materials?: unknown; errors: string[] }
 
 export async function syncAll(opts: { quiet?: boolean } = {}): Promise<SyncReport> {
   const report: SyncReport = { errors: [] };
@@ -25,6 +26,13 @@ export async function syncAll(opts: { quiet?: boolean } = {}): Promise<SyncRepor
       report.calendar = await syncCalendar();
     } catch (e) {
       report.errors.push(`Календарь: ${(e as Error).message}`);
+    }
+  }
+  if (report.lms) {
+    try {
+      report.materials = await syncAllMaterials();
+    } catch (e) {
+      report.errors.push(`Материалы: ${(e as Error).message}`);
     }
   }
   try {
