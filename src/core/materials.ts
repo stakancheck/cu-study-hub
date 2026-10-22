@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import TurndownService from "turndown";
-import { courseOverride, loadConfig, ROOT } from "../config";
+import { courseOverride, loadConfig, mcpServerEntry, ROOT } from "../config";
 import { api, lms } from "../connectors/lms/client";
 import { getDb, setMeta } from "./db";
 import { ruleByLmsId } from "./rules";
@@ -222,6 +222,6 @@ export function writeCourseRoot(courseId: number) {
 MCP cu-hub: course_grades, course_materials, board_get, study_plan, workspace_create.
 
 `);
-  writeFileSync(join(root, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": { command: "bun", args: [join(ROOT, "src/mcp/server.ts")] } } }, null, 2));
+  writeFileSync(join(root, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": mcpServerEntry() } }, null, 2));
   return root;
 }

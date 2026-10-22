@@ -107,3 +107,11 @@ export function saveConfig(patch: Partial<Record<keyof HubConfig, unknown>>) {
 
 const KEYCHAIN_DEFAULT = "cu-hub-caldav";
 export { KEYCHAIN_DEFAULT };
+
+/**
+ * MCP server entry for .mcp.json files. Absolute bun path: Claude desktop and Finder-launched sessions
+ * do not read the shell profile, so ~/.bun/bin is not on their PATH.
+ */
+export function mcpServerEntry() {
+  return { command: process.execPath, args: [join(ROOT, "src/mcp/server.ts")] };
+}

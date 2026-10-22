@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, ROOT } from "../config";
+import { loadConfig, mcpServerEntry, ROOT } from "../config";
 import { api } from "../connectors/lms/client";
 import { getDb } from "./db";
 import { adviseLateDays, gradeAll, lmsUrl, workItems } from "./engine";
@@ -115,7 +115,7 @@ MCP-сервер cu-hub: \`task_context\`, \`course_materials\`, \`course_grades
   writeFileSync(join(dir, "MATERIALS.md"), `# Материалы темы «${it.theme}»\n\nВесь курс: ../_course/README.md\n\n${linksMd}${repos.length ? `Репозитории:\n${cloneNotes.join("\n")}\n\n` : ""}${relink(themeMd.replace(/^# .*\n/, ""))}`);
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd);
   // Make the folder a self-contained Claude Code project: MCP + /defend.
-  writeFileSync(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": { command: "bun", args: [join(ROOT, "src/mcp/server.ts")] } } }, null, 2));
+  writeFileSync(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": mcpServerEntry() } }, null, 2));
   mkdirSync(join(dir, ".claude/commands"), { recursive: true });
   for (const f of ["defend.md", "do.md"]) {
     const src = join(ROOT, ".claude/commands", f);

@@ -67,7 +67,7 @@ export async function startDraft(cardId: string): Promise<AgentRun> {
   // sh backgrounds the process and prints its pid; the agent is reparented to launchd and outlives the hub.
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   const cmd = `cd ${q(ws.dir)} && nohup ${args.map(q).join(" ")} > .cu-agent/result.json 2> .cu-agent/stderr.log < /dev/null & echo $!`;
-  const r = Bun.spawnSync(["/bin/sh", "-c", cmd], { env: { ...process.env, PATH: `${join(homedir(), ".local/bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` } });
+  const r = Bun.spawnSync(["/bin/sh", "-c", cmd], { env: { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${join(homedir(), ".bun/bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` } });
   const pid = Number(r.stdout.toString().trim()) || null;
   const run: AgentRun = {
     id: crypto.randomUUID().slice(0, 8), card_id: cardId, dir: ws.dir, pid, mode, status: "running",

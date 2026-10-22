@@ -1,5 +1,10 @@
 {
   "mcpServers": {
-    "cu-hub": { "command": "bun", "args": ["/Users/stakancheck/Projects/cu-study-hub/src/mcp/server.ts"] }
+    "cu-hub": {
+      "command": "/Users/stakancheck/.bun/bin/bun",
+      "args": [
+        "/Users/stakancheck/Projects/cu-study-hub/src/mcp/server.ts"
+      ]
+    }
   }
 }
