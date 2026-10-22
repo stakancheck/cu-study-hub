@@ -1,0 +1,28 @@
+# Основы компьютерных сетей · силлабус: https://cuhandlog.ru/space/ef5cd6c2-3352-443d-9efd-29440d5ab735/article/5f482cfe-ef14-4aca-94e0-6055c86bcbe5
+slug: compnet
+lms_id: 1116
+title: Основы компьютерных сетей
+short: Сети
+color: blue
+assessment: экзамен
+pass_threshold: 3.5
+rounding: null
+ai_policy:
+  mode: tutor_only
+  note: Можно использовать ИИ для поиска и систематизации информации. Решения выполняются самостоятельно.
+activities:
+  - { key: project, lms: "Проект", weight: 0.30, planned: 3, late_days: false, kind: project, effort_h: 10 }
+  - { key: seminar_tasks, lms: "Семинарские задачи", weight: 0.24, planned: 12, late_days: false, kind: seminar, effort_h: 1.5 }
+  - { key: defense, lms: "Защита решения семинарской задачи", weight: 0.16, planned: 12, late_days: false, kind: attendance, effort_h: 0.5 }
+  - { key: exam, lms: "Экзамен", weight: 0.30, planned: 1, late_days: false, kind: exam, effort_h: 10 }
+blockers:
+  - { label: "Проект 1 ≥ 3.5", activity: project, match: "проекта №1", min: 3.5 }
+  - { label: "Проект 2 ≥ 3.5", activity: project, match: "проекта №2", min: 3.5 }
+  - { label: "Экзамен ≥ 3.5", activity: exam, min: 3.5 }
+calendar:
+  match: ["сет"]
+  kinds:
+    seminar: { match: ["семинар", "практик"], activities: [seminar_tasks, defense] }
+    lecture: { match: ["лекци"], activities: [], recording: true }
+prep:
+  - { before: seminar, title: "Разобрать материалы недели и решить семинарскую задачу до защиты", effort_h: 1 }

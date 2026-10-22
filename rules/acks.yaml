@@ -1,0 +1,12 @@
+# Ознакомление с локально-нормативными актами: без оценки, но с дедлайнами
+slug: acks
+lms_id: 1577
+title: Ознакомление с ЛНА и приказами ЦУ
+short: ЛНА
+color: brown
+assessment: none
+pass_threshold: 0
+graded: false
+ai_policy: { mode: execute, note: "" }
+activities: []
+blockers: []

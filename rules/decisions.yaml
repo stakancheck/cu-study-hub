@@ -1,0 +1,29 @@
+# Выбор: как принимать решения · силлабус: https://cuhandlog.ru/space/ef5cd6c2-3352-443d-9efd-29440d5ab735/article/bafe7449-c7f6-4396-8a58-3e4c6e99a1ab
+slug: decisions
+lms_id: 1194
+title: "Выбор: как принимать решения"
+short: Выбор
+color: purple
+assessment: зачёт
+pass_threshold: 6
+rounding: null
+ai_policy:
+  mode: tutor_only
+  note: >-
+    ИИ можно использовать, чтобы разобраться в теме. Генерировать решения домашних, семинарских
+    и других самостоятельных заданий ИИ НЕЛЬЗЯ.
+activities:
+  - { key: activity, lms: "Активность на занятиях", weight: 0.30, planned: 12, late_days: false, kind: attendance, effort_h: 1.5 }
+  - { key: case, lms: "Кейс", weight: 0.30, planned: 9, late_days: false, kind: attendance, effort_h: 0 }   # в LMS вес 0.2
+  - { key: homework, lms: "Домашние задания", weight: 0.30, planned: 12, late_days: true, kind: homework, effort_h: 1.5 }
+  - { key: final, lms: "Итоговый проект", weight: 0.10, planned: 1, late_days: false, kind: project, effort_h: 6 }
+blockers:
+  - { label: "Итоговый проект ≥ 3.5", activity: final, min: 3.5 }
+# В LMS задания заведены для двух групп; ты в группе пн 17:30
+exclude_exercises: ["пн 16:00"]
+calendar:
+  match: ["выбор", "принят"]
+  kinds:
+    seminar: { match: [".*"], activities: [activity, case] }
+prep:
+  - { before: seminar, title: "Повторить инструмент прошлого занятия, принести ДЗ", effort_h: 0.3 }

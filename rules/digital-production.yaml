@@ -1,0 +1,31 @@
+# Цифровизация производства · силлабус: https://cuhandlog.ru/space/ef5cd6c2-3352-443d-9efd-29440d5ab735/article/485b8cdc-a809-42ff-a795-34940a16e3f6
+slug: digital-production
+lms_id: 1548
+title: Цифровизация производства
+short: Цифр.
+color: red
+assessment: дифференцированный зачёт
+pass_threshold: 3.5
+rounding: null
+ai_policy:
+  mode: assist
+  note: >-
+    ИИ можно использовать для кодирования пайплайна. Принципы анализа, выбор KPI, параметры дашборда
+    и оценку результата нужно задавать и защищать самостоятельно.
+activities:
+  - { key: seminar, lms: "Активность на семинаре", weight: 0.20, planned: 15, late_days: false, kind: attendance, effort_h: 1.5 }
+  - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 10, late_days: true, kind: homework, effort_h: 3 }
+  - { key: project1, lms: "Проект, часть 1", weight: 0.25, planned: 1, late_days: true, kind: project, effort_h: 8 }
+  - { key: project2, lms: "Проект, часть 2", weight: 0.35, planned: 1, late_days: true, kind: project, effort_h: 15 }
+  - { key: bonus, lms: "Бонусные баллы", weight: 0.15, planned: 15, late_days: false, kind: bonus, effort_h: 0 }
+blockers:
+  - { label: "6 ДЗ на ≥ 3.5", activity: homework, min: 3.5, count: 6 }
+  - { label: "Проект ч.1 ≥ 3.5", activity: project1, min: 3.5 }
+  - { label: "Проект ч.2 ≥ 3.5", activity: project2, min: 3.5 }
+calendar:
+  match: ["цифров", "производ", "сибур"]
+  kinds:
+    seminar: { match: ["семинар", "практик"], activities: [seminar] }
+    lecture: { match: ["лекци"], activities: [bonus] }
+prep:
+  - { before: seminar, title: "Подготовить данные для блока «Визуализация KPI»", effort_h: 0.5 }

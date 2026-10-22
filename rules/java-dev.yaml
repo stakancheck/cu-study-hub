@@ -1,0 +1,29 @@
+# Разработка на Java · силлабус: https://cuhandlog.ru/space/ef5cd6c2-3352-443d-9efd-29440d5ab735/article/826fb961-1f58-41dd-a361-2a37c2633624
+slug: java-dev
+lms_id: 1118
+title: Разработка на Java
+short: Java
+color: orange
+assessment: экзамен
+pass_threshold: 3.5
+rounding: null            # в силлабусе не указано, см. Положение о промежуточной аттестации
+ai_policy:
+  mode: assist
+  note: >-
+    Нейросетями можно пользоваться осмысленно. Преподаватель может попросить пояснить любой фрагмент решения;
+    если не можешь объяснить часть работы, она не засчитывается.
+activities:
+  - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 6, late_days: true, kind: homework, effort_h: 6 }
+  - { key: test, lms: "Контрольная работа", weight: 0.20, planned: 3, late_days: false, kind: test, effort_h: 3 }
+  - { key: project, lms: "Проект", weight: 0.30, planned: 1, late_days: false, kind: project, effort_h: 20 }
+  - { key: exam, lms: "Экзамен", weight: 0.30, planned: 1, late_days: false, kind: exam, effort_h: 10 }
+blockers:
+  - { label: "Проект ≥ 3.5", activity: project, min: 3.5 }
+  - { label: "Экзамен ≥ 3.5", activity: exam, min: 3.5 }
+calendar:
+  match: ["java"]
+  kinds:
+    seminar: { match: ["семинар", "практик"], activities: [], note: "на семинарах защищают ДЗ" }
+    lecture: { match: ["лекци"], activities: [], recording: true }
+prep:
+  - { before: seminar, title: "Прочитать материалы недели и прогнать пример с лекции", effort_h: 0.5 }

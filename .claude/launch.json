@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "board", "runtimeExecutable": "bun", "runtimeArgs": ["src/cli.ts", "serve"], "port": 4321 }
+  ]
+}

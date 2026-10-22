@@ -1,0 +1,30 @@
+# Системный анализ · силлабус: https://cuhandlog.ru/space/ef5cd6c2-3352-443d-9efd-29440d5ab735/article/cdea1f42-e1be-4e2a-b298-6a0df093abbb
+slug: sysanalysis
+lms_id: 1208
+title: Системный анализ
+short: СА
+color: green
+assessment: экзамен
+pass_threshold: 3.5
+rounding: null
+ai_policy:
+  mode: execute
+  note: >-
+    ИИ можно использовать для решения задач и генерации идей, кроме явно запрещённых случаев.
+    Результат должен быть понятен: могут попросить объяснить устно или письменно.
+activities:
+  - { key: tests, lms: "Тесты", weight: 0.10, planned: 4, late_days: false, kind: test, effort_h: 1 }
+  - { key: seminar, lms: "Аудиторная активность", weight: 0.20, planned: 11, late_days: false, kind: attendance, effort_h: 1.5 }
+  - { key: project, lms: "Проект", weight: 0.30, planned: 4, late_days: false, kind: project, effort_h: 8 }
+  - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 10, late_days: true, kind: homework, effort_h: 3 }
+  - { key: exam, lms: "Экзамен", weight: 0.20, planned: 1, late_days: false, kind: exam, effort_h: 8 }
+blockers:
+  - { label: "Все части проекта сданы", activity: project, all_submitted: true }
+  - { label: "Экзамен ≥ 3.5", activity: exam, min: 3.5 }
+calendar:
+  match: ["систем", "SA\\b"]
+  kinds:
+    seminar: { match: ["семинар", "практик", "воркшоп"], activities: [seminar] }
+    lecture: { match: ["лекци"], activities: [], recording: true }
+prep:
+  - { before: seminar, title: "Пролистать лекцию недели и шаблоны артефактов", effort_h: 0.3 }

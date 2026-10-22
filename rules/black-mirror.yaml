@@ -1,0 +1,26 @@
+# Чёрное зеркало: кино и теория медиа · силлабус: https://cuhandlog.ru/space/ef5cd6c2-3352-443d-9efd-29440d5ab735/article/4dc6c75e-f5ca-4f66-a694-c9d98bb2dc28
+slug: black-mirror
+lms_id: 1539
+title: "Чёрное зеркало: кино и теория медиа"
+short: Ч. зеркало
+color: gray
+assessment: зачёт
+pass_threshold: 3.5
+rounding: null
+ai_policy:
+  mode: tutor_only
+  note: >-
+    ИИ можно использовать для поиска и систематизации информации. В видео ИИ можно использовать ограниченно
+    (отдельные спецэффекты), с обязательным указанием моделей, целей и способа применения.
+activities:
+  - { key: classwork, lms: "Аудиторная работа", weight: 0.40, planned: 15, late_days: false, kind: attendance, effort_h: 1.5 }
+  - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 3, late_days: true, kind: homework, effort_h: 4 }
+  - { key: final, lms: "Итоговый проект", weight: 0.40, planned: 1, late_days: false, kind: project, effort_h: 20 }
+blockers:
+  - { label: "Итоговый проект ≥ 3.5", activity: final, min: 3.5 }
+calendar:
+  match: ["зеркал", "кино", "медиа"]
+  kinds:
+    seminar: { match: [".*"], activities: [classwork] }
+prep:
+  - { before: seminar, title: "Посмотреть фильм/фрагменты к семинару", effort_h: 2 }
