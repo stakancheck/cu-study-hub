@@ -9,7 +9,7 @@
 Нужны macOS, [Bun](https://bun.sh) и (для агентов) [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone <репозиторий> ~/Projects/cu-study-hub && cd ~/Projects/cu-study-hub
+git clone https://github.com/stakancheck/cu-study-hub.git ~/Projects/cu-study-hub && cd ~/Projects/cu-study-hub
 bun install
 bun link            # глобальная команда `cu` (bin в package.json)
 cu setup            # мастер настройки в браузере
