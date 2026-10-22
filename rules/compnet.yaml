@@ -7,9 +7,6 @@ color: blue
 assessment: экзамен
 pass_threshold: 3.5
 rounding: null
-ai_policy:
-  mode: tutor_only
-  note: Можно использовать ИИ для поиска и систематизации информации. Решения выполняются самостоятельно.
 activities:
   - { key: project, lms: "Проект", weight: 0.30, planned: 3, late_days: false, kind: project, effort_h: 10 }
   - { key: seminar_tasks, lms: "Семинарские задачи", weight: 0.24, planned: 12, late_days: false, kind: seminar, effort_h: 1.5 }

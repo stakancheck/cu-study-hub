@@ -7,6 +7,5 @@ color: brown
 assessment: none
 pass_threshold: 0
 graded: false
-ai_policy: { mode: execute, note: "" }
 activities: []
 blockers: []

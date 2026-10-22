@@ -32,7 +32,6 @@ export interface Card {
   verdictLabel?: string;
   priority: number;
   notes: string;
-  aiMode?: string;
   link?: string;
   score?: number | null;
   effortH?: number;
@@ -156,7 +155,7 @@ function itemCard(it: WorkItem, col: ColumnId, l?: LocalCard): Card {
   return {
     id: it.id, kind: "lms", courseId: it.courseId, course: it.course, color: it.color, title: it.title,
     subtitle: it.theme ?? "", col, due: it.deadline, delta: it.delta, blocker: it.blocker, lateDays: it.lateDaysAllowed,
-    state: it.state, priority: it.priority, notes: l?.notes ?? "", aiMode: it.aiMode,
+    state: it.state, priority: it.priority, notes: l?.notes ?? "",
     link: lmsUrl(it.courseId, it.themeId, it.longreadId), score: it.score, effortH: l?.effort_h ?? it.effortH, ord: l?.ord ?? 0,
   };
 }

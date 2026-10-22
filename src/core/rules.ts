@@ -3,7 +3,6 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { loadConfig, onConfigChange, RULES_DIR } from "../config";
 
-export type AiMode = "execute" | "assist" | "tutor_only";
 export type ActKind = "homework" | "test" | "project" | "exam" | "seminar" | "attendance" | "bonus";
 
 export interface ActivityRule {
@@ -42,7 +41,6 @@ export interface CourseRule {
   pass_threshold: number;
   rounding: string | null;
   graded?: boolean;
-  ai_policy: { mode: AiMode; note: string };
   activities: ActivityRule[];
   blockers: BlockerRule[];
   exclude_exercises?: string[];
@@ -111,8 +109,3 @@ export function ruleBySlug(q: string): CourseRule | undefined {
 
 export const norm = (s: string) => s.replace(/ /g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 
-export const AI_MODE_LABEL: Record<AiMode, string> = {
-  execute: "агент может делать черновик",
-  assist: "вместе, с объяснением каждого шага",
-  tutor_only: "только наводящие вопросы, решение пишешь сам",
-};

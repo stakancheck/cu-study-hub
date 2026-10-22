@@ -75,8 +75,6 @@ export interface CourseGrade {
   warnings: string[];
   waiting: { name: string; state: string }[];
   rounding: string | null;
-  aiMode: CourseRule["ai_policy"]["mode"];
-  aiNote: string;
   syllabusUrl: string | null;
   timeUrl: string | null;
   links: CourseLink[];
@@ -104,7 +102,6 @@ export interface WorkItem {
   blocker: string | null;
   effortH: number;
   priority: number;
-  aiMode: string;
   hoursLeft: number | null;
 }
 
@@ -204,7 +201,6 @@ export function gradeCourse(rule: CourseRule): CourseGrade | null {
     id: rule.lms_id, slug: rule.slug, title: rule.title, short: rule.short, color: rule.color,
     threshold, earned, lost, remaining, maxReachable, bonusLeft, neededShare, status,
     activities, blockers, warnings, waiting, rounding: rule.rounding,
-    aiMode: rule.ai_policy.mode, aiNote: rule.ai_policy.note,
     syllabusUrl: ov.syllabusUrl || course.syllabus_url, timeUrl: ov.timeUrl || course.time_url, links: ov.links ?? [],
   };
 }
@@ -302,7 +298,7 @@ export function workItems(grades = gradeAll()): WorkItem[] {
         course: g.short, color: g.color, title: ex.name.trim(), theme: ex.theme_name, longreadId: ex.longread_id,
         themeId: ex.theme_id, activity: la?.name ?? "", kind: ar?.kind ?? "admin", state, deadline,
         score: t?.score ?? null, delta, lateDaysAllowed, lateDaysUsed: t?.late_days ?? null,
-        blocker: blocker?.label ?? null, effortH, priority: 0, aiMode: g.aiMode, hoursLeft,
+        blocker: blocker?.label ?? null, effortH, priority: 0, hoursLeft,
       });
     }
   }

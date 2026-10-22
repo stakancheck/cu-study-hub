@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { loadConfig } from "../config";
 import { getDb } from "./db";
 import { notifyOnce } from "./notify";
-import { ruleByLmsId } from "./rules";
 import { createWorkspace } from "./workspace";
 import { workItems } from "./engine";
 
@@ -25,21 +24,10 @@ export function claudeBin(): string {
   return found;
 }
 
-const PROMPTS: Record<string, (title: string) => string> = {
-  execute: (t) => `Задача «${t}». Прочитай CLAUDE.md, BRIEF.md, MATERIALS.md и ../COURSE_NOTES.md (если есть); если задание опирается на прошлые темы, загляни в ../_course (оглавление ../_course/README.md, вложения в ../_course/attachments, PDF читай инструментом Read).
-Сделай черновик готовой работы в этой папке: код в отдельных файлах или текст в DRAFT.md, в том формате, который требует задание.
-Затем напиши DEFENSE.md: что сделано, почему так, слабые места, 5-7 вероятных вопросов на защите с ответами.
-В конце коротко перечисли созданные файлы, что осталось сделать студенту и что непонятно в условии.`,
-  assist: (t) => `Задача «${t}». Прочитай CLAUDE.md, BRIEF.md, MATERIALS.md и ../COURSE_NOTES.md (если есть); при необходимости ../_course (оглавление ../_course/README.md, вложения в ../_course/attachments) и прошлые работы из ../HISTORY.md как образец формата.
-Политика курса: студент должен уметь объяснить любую часть решения. Сделай черновик (код в файлах или DRAFT.md) и рядом подробные пояснения в EXPLAIN.md: по каждому файлу или разделу что он делает и почему так.
-Затем DEFENSE.md: 7-10 вопросов, которые реально зададут на защите, с короткими ответами и ссылками на места в коде.
-В конце коротко перечисли созданные файлы и что студенту нужно проверить и переписать своими словами.`,
-  tutor_only: (t) => `Задача «${t}». Прочитай CLAUDE.md, BRIEF.md и MATERIALS.md; при необходимости ../_course.
-ВАЖНО: политика курса запрещает генерировать решение с помощью ИИ. Не пиши ответ, текст работы или код за студента.
-Сделай PLAN.md: что требуется сдать (по пунктам условия), структура работы (разделы и что в каждом должно быть, без готового текста),
-наводящие вопросы к каждому разделу, на какие материалы курса опереться (конкретные недели и файлы из ../_course), чек-лист самопроверки перед сдачей.
-В конце коротко скажи, что получилось и с чего студенту начать.`,
-};
+const draftPrompt = (t: string) => `Задача «${t}». Прочитай CLAUDE.md, BRIEF.md, MATERIALS.md и ../COURSE_NOTES.md (если есть); если задание опирается на прошлые темы, загляни в ../_course (оглавление ../_course/README.md, вложения в ../_course/attachments, PDF читай инструментом Read) и в ../HISTORY.md как образец формата.
+Сделай готовую работу в этой папке в том формате, который требует задание: код в файлах проекта, текст в DRAFT.md, материалы для презентации и т.д.
+Рядом напиши EXPLAIN.md (что сделано в каждой части и почему так) и DEFENSE.md (7-10 вероятных вопросов на защите с короткими ответами и ссылками на места в работе).
+В конце коротко перечисли созданные файлы, что студенту проверить перед сдачей и что непонятно в условии.`;
 
 export interface AgentRun {
   id: string; card_id: string; dir: string; pid: number | null; mode: string; status: "running" | "done" | "failed";
@@ -63,13 +51,12 @@ export async function startDraft(cardId: string): Promise<AgentRun> {
   const it = workItems().find((i) => i.id === cardId);
   if (!it) throw new Error("Черновик можно сделать только для задачи из LMS");
   const ws = await createWorkspace(cardId);
-  const rule = ruleByLmsId(it.courseId)!;
-  const mode = rule.ai_policy.mode;
+  const mode = "draft";
   const out = join(ws.dir, ".cu-agent");
   mkdirSync(out, { recursive: true });
   const cfg = loadConfig().agent ?? {};
   const args = [
-    claudeBin(), "-p", PROMPTS[mode](it.title),
+    claudeBin(), "-p", draftPrompt(it.title),
     "--output-format", "json",
     "--permission-mode", "acceptEdits",
     "--max-turns", String(cfg.maxTurns ?? 60),

@@ -41,7 +41,7 @@ function coursePage(slug: string) {
   const { cards } = buildBoard();
   return {
     grade: g,
-    rule: { slug: rule.slug, title: rule.title, assessment: rule.assessment, rounding: rule.rounding, ai: rule.ai_policy },
+    rule: { slug: rule.slug, title: rule.title, assessment: rule.assessment, rounding: rule.rounding },
     themes,
     cards: cards.filter((c) => c.courseId === rule.lms_id),
     settings: courseSettings(rule.lms_id),

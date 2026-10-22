@@ -7,11 +7,6 @@ color: gray
 assessment: зачёт
 pass_threshold: 3.5
 rounding: null
-ai_policy:
-  mode: tutor_only
-  note: >-
-    ИИ можно использовать для поиска и систематизации информации. В видео ИИ можно использовать ограниченно
-    (отдельные спецэффекты), с обязательным указанием моделей, целей и способа применения.
 activities:
   - { key: classwork, lms: "Аудиторная работа", weight: 0.40, planned: 15, late_days: false, kind: attendance, effort_h: 1.5 }
   - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 3, late_days: true, kind: homework, effort_h: 4 }

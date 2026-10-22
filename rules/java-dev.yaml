@@ -7,11 +7,6 @@ color: orange
 assessment: экзамен
 pass_threshold: 3.5
 rounding: null            # в силлабусе не указано, см. Положение о промежуточной аттестации
-ai_policy:
-  mode: assist
-  note: >-
-    Нейросетями можно пользоваться осмысленно. Преподаватель может попросить пояснить любой фрагмент решения;
-    если не можешь объяснить часть работы, она не засчитывается.
 activities:
   - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 6, late_days: true, kind: homework, effort_h: 6 }
   - { key: test, lms: "Контрольная работа", weight: 0.20, planned: 3, late_days: false, kind: test, effort_h: 3 }

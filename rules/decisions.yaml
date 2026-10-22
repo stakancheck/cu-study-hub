@@ -7,11 +7,6 @@ color: purple
 assessment: зачёт
 pass_threshold: 6
 rounding: null
-ai_policy:
-  mode: tutor_only
-  note: >-
-    ИИ можно использовать, чтобы разобраться в теме. Генерировать решения домашних, семинарских
-    и других самостоятельных заданий ИИ НЕЛЬЗЯ.
 activities:
   - { key: activity, lms: "Активность на занятиях", weight: 0.30, planned: 12, late_days: false, kind: attendance, effort_h: 1.5 }
   - { key: case, lms: "Кейс", weight: 0.30, planned: 9, late_days: false, kind: attendance, effort_h: 0 }   # в LMS вес 0.2

@@ -7,11 +7,6 @@ color: green
 assessment: экзамен
 pass_threshold: 3.5
 rounding: null
-ai_policy:
-  mode: execute
-  note: >-
-    ИИ можно использовать для решения задач и генерации идей, кроме явно запрещённых случаев.
-    Результат должен быть понятен: могут попросить объяснить устно или письменно.
 activities:
   - { key: tests, lms: "Тесты", weight: 0.10, planned: 4, late_days: false, kind: test, effort_h: 1 }
   - { key: seminar, lms: "Аудиторная активность", weight: 0.20, planned: 11, late_days: false, kind: attendance, effort_h: 1.5 }

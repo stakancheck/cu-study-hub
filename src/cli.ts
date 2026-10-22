@@ -78,7 +78,7 @@ switch (cmd) {
     const it = findItem(args.join(" "));
     if (!it) { console.error("Не нашёл задачу"); process.exit(1); }
     const res = await createWorkspace(it.id);
-    console.log(`Папка: ${res.dir}\nРежим ИИ: ${res.aiMode}\n${res.cloneNotes.join("\n")}\n\ncd "${res.dir}" && claude`);
+    console.log(`Папка: ${res.dir}\n${res.cloneNotes.join("\n")}\n\ncd "${res.dir}" && claude`);
     break;
   }
   case "draft": {

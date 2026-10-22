@@ -157,9 +157,6 @@ export async function syncCourseMaterials(courseId: number, opts: { download?: b
 ## Ссылки
 ${links.join("\n")}
 
-## Политика ИИ курса
-${rule.ai_policy.note}
-
 ## По неделям
 ${index.map((i) => `- [${i.name}](<${i.file}>)${i.date ? ` · ${new Date(i.date).toLocaleDateString("ru-RU")}` : ""}`).join("\n")}
 
@@ -215,7 +212,7 @@ export function writeCourseRoot(courseId: number) {
 
 Папка курса в «Учебном штабе» студента Центрального университета.
 
-- _course/: зеркало LMS. README.md (оглавление, ссылки, политика ИИ), файл на каждую неделю, attachments/
+- _course/: зеркало LMS. README.md (оглавление, ссылки), файл на каждую неделю, attachments/
   (лекции, презентации, условия заданий), SYLLABUS.md (система оценивания), repo/ (репозиторий курса).
 - Остальные подпапки: рабочие папки отдельных задач (BRIEF.md, MATERIALS.md, свой CLAUDE.md с режимом агента).
 - COURSE_NOTES.md (если есть): правила самого студента для курса, важнее общих инструкций.
@@ -224,7 +221,6 @@ export function writeCourseRoot(courseId: number) {
 
 MCP cu-hub: course_grades, course_materials, board_get, study_plan, workspace_create.
 
-Политика ИИ курса: ${rule.ai_policy.note}
 `);
   writeFileSync(join(root, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": { command: "bun", args: [join(ROOT, "src/mcp/server.ts")] } } }, null, 2));
   return root;

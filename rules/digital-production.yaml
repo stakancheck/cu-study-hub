@@ -7,11 +7,6 @@ color: red
 assessment: дифференцированный зачёт
 pass_threshold: 3.5
 rounding: null
-ai_policy:
-  mode: assist
-  note: >-
-    ИИ можно использовать для кодирования пайплайна. Принципы анализа, выбор KPI, параметры дашборда
-    и оценку результата нужно задавать и защищать самостоятельно.
 activities:
   - { key: seminar, lms: "Активность на семинаре", weight: 0.20, planned: 15, late_days: false, kind: attendance, effort_h: 1.5 }
   - { key: homework, lms: "Домашнее задание", weight: 0.20, planned: 10, late_days: true, kind: homework, effort_h: 3 }

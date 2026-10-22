@@ -143,7 +143,7 @@ server.registerTool("late_days_advice", {
 });
 
 server.registerTool("task_context", {
-  description: "Полный контекст задачи для работы: метаданные, вклад в оценку, политика ИИ курса, материалы темы из LMS (markdown).",
+  description: "Полный контекст задачи для работы: метаданные, вклад в оценку, материалы темы из LMS (markdown).",
   inputSchema: { task: z.string().describe("id карточки или часть названия") },
 }, async ({ task }) => {
   const it = findItem(task);
@@ -152,7 +152,7 @@ server.registerTool("task_context", {
   const detail = it.taskId ? await api.task(it.taskId).catch(() => null) : null;
   const mats = await api.materials(it.longreadId).catch(() => null);
   return json({
-    item: it, aiPolicy: rule.ai_policy, reviewer: detail?.reviewer?.name,
+    item: it, reviewer: detail?.reviewer?.name,
     materials: (mats?.items ?? []).map((m: any) => ({ type: m.discriminator, name: m.name, content: m.viewContent?.slice?.(0, 6000) })),
     hint: "Для полноценной работы вызови workspace_create: он соберёт BRIEF.md, MATERIALS.md и CLAUDE.md с правилами.",
   });

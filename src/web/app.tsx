@@ -6,7 +6,7 @@ type Col = "overdue" | "inbox" | "week" | "today" | "doing" | "review" | "done";
 interface Card {
   id: string; kind: "lms" | "event" | "prep" | "manual"; courseId: number | null; course: string | null; color: string | null;
   title: string; subtitle: string; col: Col; due: string | null; delta: number; blocker: string | null; lateDays: boolean;
-  state: string; verdict?: string; verdictLabel?: string; priority: number; notes: string; aiMode?: string; link?: string;
+  state: string; verdict?: string; verdictLabel?: string; priority: number; notes: string; link?: string;
   score?: number | null; effortH?: number; ord: number;
 }
 interface Activity { key: string; name: string; kind: string; weight: number; syllabusWeight: number; planned: number; graded: number; earned: number; remaining: number; lost: number; itemValue: number; lateDays: boolean; scores: { name: string; score: number }[] }
@@ -14,7 +14,7 @@ interface Grade {
   id: number; slug: string; title: string; short: string; color: string; threshold: number; earned: number; lost: number; remaining: number;
   maxReachable: number; bonusLeft: number; neededShare: number; status: "ok" | "watch" | "risk" | "blocked" | "impossible";
   activities: Activity[]; blockers: { label: string; status: string; detail: string }[]; warnings: string[];
-  waiting: { name: string; state: string }[]; rounding: string | null; aiMode: string; aiNote: string; syllabusUrl: string | null; timeUrl: string | null; links: { label: string; url: string }[];
+  waiting: { name: string; state: string }[]; rounding: string | null; syllabusUrl: string | null; timeUrl: string | null; links: { label: string; url: string }[];
 }
 interface ClassEv { uid: string; start: string; end: string; title: string; location: string; courseId: number | null; course: string | null; color: string | null; verdict: string; points: number; reason: string; attended: number | null }
 interface Item { id: string; course: string; color: string; title: string; deadline: string | null; delta: number; blocker: string | null; lateDaysAllowed: boolean; state: string; hoursLeft: number | null; effortH: number; lateDayAdvice?: { allowed: boolean; reasoning: string; suggestDays: number } | null }
@@ -66,9 +66,6 @@ const LMS_STATE: Record<string, [string, string]> = {
   notCreated: ["gray", "Нет в LMS"], overdue: ["red", "Просрочено, можно спасти"], backlog: ["gray", "Не начато"], inProgress: ["blue", "В работе"], submitted: ["purple", "Отправлено"],
   review: ["purple", "На проверке"], evaluated: ["green", "Оценено"], failed: ["red", "Не сдано"], planned: ["gray", "Запланировано"],
   attended: ["green", "Был"], skipped: ["red", "Пропустил"], open: ["gray", "Открыто"], done: ["green", "Готово"],
-};
-const AI: Record<string, [string, string]> = {
-  execute: ["green", "ИИ: черновик"], assist: ["yellow", "ИИ: вместе"], tutor_only: ["red", "ИИ: только подсказки"],
 };
 const LMS_LOCKED = new Set(["submitted", "review", "evaluated", "failed"]);
 const OPEN_STATES = new Set(["backlog", "inProgress", "notCreated", "overdue"]);
@@ -357,7 +354,7 @@ function KCard({ c, onOpen, onDrag, dragging }: { c: Card; onOpen: () => void; o
 // ---------- Peek ----------
 function Peek({ card, grade, close, reload, flash, balance }: { card: Card; grade?: Grade; close: () => void; reload: () => void; flash: (m: string) => void; balance: number | null }) {
   const [notes, setNotes] = useState(card.notes);
-  const [ws, setWs] = useState<{ dir: string; cloneNotes: string[]; aiMode: string; attachments?: number } | null>(null);
+  const [ws, setWs] = useState<{ dir: string; cloneNotes: string[]; attachments?: number } | null>(null);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const loadRun = useCallback(() => card.kind === "lms" ? api<AgentRun | null>(`/api/agent/run/${encodeURIComponent(card.id)}`).then(setRun).catch(() => {}) : Promise.resolve(), [card.id, card.kind]);
@@ -421,7 +418,6 @@ function Peek({ card, grade, close, reload, flash, balance }: { card: Card; grad
           {card.delta > 0 && <><div className="k">Σ Вклад в итог</div><div className="v num">+{f2(card.delta)} из 10</div></>}
           {card.blocker && <><div className="k">⛔ Блокер</div><div className="v"><Tag c="red">{card.blocker}</Tag></div></>}
           {card.kind === "lms" && <><div className="k">⏳ Late days</div><div className="v">{card.lateDays ? <><Tag c="green">можно</Tag><span className="muted">на балансе {balance ?? "?"} · 1 LD = 1 день, максимум 7, не позже 19.12</span></> : <Tag>нельзя по силлабусу</Tag>}</div></>}
-          {card.aiMode && <><div className="k">✦ Политика ИИ</div><div className="v"><Tag c={AI[card.aiMode]?.[0]}>{AI[card.aiMode]?.[1]}</Tag></div></>}
           {card.verdictLabel && <><div className="k">✓ Идти?</div><div className="v">{card.verdictLabel}</div></>}
           {card.effortH != null && <><div className="k">⌛ Оценка времени</div><div className="v">{card.effortH} ч</div></>}
         </div>
@@ -431,26 +427,17 @@ function Peek({ card, grade, close, reload, flash, balance }: { card: Card; grad
           const close = new Date(Date.parse(card.due) + 7 * 864e5).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
           return <div className="callout red"><span className="ci">⏳</span><div><b>Дедлайн прошёл, но работу можно спасти.</b> Если сдать сегодня до {time(card.due)}, понадобится {n} LD, завтра {n + 1}. Окно закроется {close}. В LMS открой «Архивные задания», нажми значок календаря у задачи и перенеси дедлайн, потом сдавай. Сейчас LMS засчитывает за неё 0.</div></div>;
         })()}
-        {grade && card.aiMode && <div className={`callout ${card.aiMode === "tutor_only" ? "red" : ""}`}><span className="ci">✦</span><div><b>Политика ИИ курса.</b> {grade.aiNote}</div></div>}
 
         {card.kind === "lms" && (
           <>
             <h3 className="h">Работа с агентом</h3>
             <div className="actions">
               <button className="btn primary" onClick={draft} disabled={busy || run?.status === "running"}>
-                {run?.status === "running" ? <><span className="spin">⟳</span> Агент работает · {minsSince(run.started_at)}</> : card.aiMode === "tutor_only" ? "✨ План и вопросы агентом" : "✨ Черновик агентом"}
+                {run?.status === "running" ? <><span className="spin">⟳</span> Агент работает · {minsSince(run.started_at)}</> : "✨ Черновик агентом"}
               </button>
               <button className="btn outline" onClick={() => chat("app")} disabled={!!opening}>💬 Открыть в Claude</button>
               <button className="btn outline" onClick={() => chat("terminal")} disabled={!!opening}>⌨️ В терминале</button>
               <button className="btn outline" onClick={() => api("/api/open-task", { method: "POST", json: { id: card.id } }).catch((e) => flash(e.message))}>📁 В Finder</button>
-            </div>
-            <div className="muted" style={{ fontSize: 12, marginTop: -8, marginBottom: 10 }}>
-              {card.aiMode === "tutor_only"
-                ? "По политике курса агент не пишет решение: сделает PLAN.md со структурой, наводящими вопросами и чек-листом."
-                : card.aiMode === "assist"
-                  ? "Агент сделает черновик, EXPLAIN.md с объяснением каждой части и DEFENSE.md с вопросами к защите."
-                  : "Агент сделает черновик и DEFENSE.md с вопросами к защите."}
-              {" "}Папка задачи видит весь курс: ../_course.
             </div>
             {run && run.status !== "running" && (
               <div className={`callout ${run.status === "failed" ? "red" : "blue"}`} style={{ marginBottom: 10 }}>
@@ -596,7 +583,6 @@ function Course({ slug, s, open, reload, flash }: { slug: string; s: State; open
           <div className="k">Σ Сейчас</div><div className="v num"><b>{f2(g.earned)}</b>&nbsp;из 10 · потеряно {f2(g.lost)} · максимум {f2(g.maxReachable)}{g.bonusLeft > 0 ? ` (+${f2(g.bonusLeft)} бонус)` : ""}</div>
           <div className="k">⚑ Порог</div><div className="v num">{g.threshold} · нужно {Number.isFinite(g.neededShare) ? Math.round(g.neededShare * 100) : "∞"}% от оставшихся баллов</div>
           <div className="k">≈ Округление</div><div className="v">{g.rounding ?? <span className="muted">не указано в силлабусе</span>}</div>
-          <div className="k">✦ Политика ИИ</div><div className="v"><Tag c={AI[g.aiMode]?.[0]}>{AI[g.aiMode]?.[1]}</Tag></div>
           <div className="k">🔗 Ссылки</div><div className="v">
             <a className="btn outline" href={`https://my.centraluniversity.ru/learn/courses/view/actual/${g.id}`} target="_blank" rel="noreferrer">LMS ↗</a>
             {g.syllabusUrl && <a className="btn outline" href={g.syllabusUrl.replace("note.cu.ru", "cuhandlog.ru")} target="_blank" rel="noreferrer">Силлабус ↗</a>}
