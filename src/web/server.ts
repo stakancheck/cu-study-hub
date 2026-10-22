@@ -14,13 +14,15 @@ import { courseDir, slugify, syncCourseMaterials, writeCourseRoot } from "../cor
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { workItems } from "../core/engine";
-import { runReminders, syncAll } from "../sync";
+import { runReminders, syncAll, type SyncReport } from "../sync";
+import { applyCourses, finishSetup, lmsSession, loginState, setupCourses, setupDone, startLogin } from "../core/setup";
 
 const cfg = loadConfig();
 const ok = (data: unknown = { ok: true }) => Response.json(data);
 const fail = (e: unknown, status = 500) => Response.json({ error: (e as Error).message ?? String(e) }, { status });
 
 let syncing: Promise<unknown> | null = null;
+let firstSync: { running: boolean; report: SyncReport | null } | null = null;
 function doSync() {
   syncing ??= syncAll().finally(() => (syncing = null));
   return syncing;
@@ -113,6 +115,7 @@ function settingsPayload() {
 const server = Bun.serve({
   port: cfg.webPort,
   hostname: "127.0.0.1",
+  idleTimeout: 255, // seconds: a full sync with materials outlives Bun's 10 s default
   development: process.env.NODE_ENV !== "production" && !process.env.CU_DAEMON,
   routes: {
     "/": index,
@@ -122,10 +125,41 @@ const server = Bun.serve({
         today: today(),
         grades,
         board: buildBoard(grades),
-        meta: { week: weekOf(), weeks: semester().weeks, lateDaysBalance: Number(getMeta("lateDaysBalance")) || null, lmsSyncedAt: getMeta("lmsSyncedAt"), calSyncedAt: getMeta("calSyncedAt"), lastSync: JSON.parse(getMeta("lastSyncReport") ?? "null"), syncing: !!syncing, calendarConfigured: !!loadConfig().caldav },
+        meta: { week: weekOf(), weeks: semester().weeks, lateDaysBalance: Number(getMeta("lateDaysBalance")) || null, lmsSyncedAt: getMeta("lmsSyncedAt"), calSyncedAt: getMeta("calSyncedAt"), lastSync: JSON.parse(getMeta("lastSyncReport") ?? "null"), syncing: !!syncing, calendarConfigured: !!loadConfig().caldav, setupDone: setupDone() },
       });
     },
     "/api/week": () => ok(week()),
+    "/api/setup": async () => ok({ done: setupDone(), session: await lmsSession(), login: loginState(), settings: settingsPayload(), firstSync }),
+    "/api/setup/login": { POST: () => ok(startLogin()) },
+    "/api/setup/courses": {
+      GET: async () => {
+        try {
+          return ok(await setupCourses());
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+      PUT: async (req) => {
+        try {
+          const sel = (await req.json()) as { id: number; short: string; color: string }[];
+          if (!sel.length) throw new Error("Выбери хотя бы один курс");
+          await applyCourses(sel);
+          return ok();
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+    },
+    "/api/setup/finish": {
+      // The first sync downloads materials and can take minutes: start it and let the wizard poll /api/setup.
+      POST: () => {
+        finishSetup();
+        firstSync = { running: true, report: null };
+        doSync().then((r) => (firstSync = { running: false, report: r as SyncReport })).catch((e) => (firstSync = { running: false, report: { errors: [String((e as Error).message)] } }));
+        startLoop();
+        return ok(firstSync);
+      },
+    },
     "/api/course/:slug": (req) => {
       const p = coursePage(req.params.slug);
       return p ? ok(p) : fail(new Error("not found"), 404);
@@ -332,13 +366,20 @@ const server = Bun.serve({
 
 console.log(`Учебный штаб: http://localhost:${server.port}`);
 
-// Background loop: sync every N minutes, reminders every 2 minutes.
-const syncEveryMs = cfg.syncIntervalMin * 60_000;
-const last = Date.parse(getMeta("lmsSyncedAt") ?? "0");
-setTimeout(() => { doSync(); setInterval(doSync, syncEveryMs); }, Math.max(0, last + syncEveryMs - Date.now()));
-const tick = () => {
-  try { runReminders(); } catch (e) { console.error("reminders:", e); }
-  try { refreshRuns(); } catch (e) { console.error("agent runs:", e); }
-};
-tick();
-setInterval(tick, 2 * 60_000);
+// Background loop: sync every N minutes, reminders every 2 minutes. Waits for the setup wizard on a fresh install.
+let looping = false;
+function startLoop() {
+  if (looping) return;
+  looping = true;
+  const syncEveryMs = cfg.syncIntervalMin * 60_000;
+  const last = Date.parse(getMeta("lmsSyncedAt") ?? "0");
+  setTimeout(() => { doSync(); setInterval(doSync, syncEveryMs); }, Math.max(0, last + syncEveryMs - Date.now()));
+  const tick = () => {
+    try { runReminders(); } catch (e) { console.error("reminders:", e); }
+    try { refreshRuns(); } catch (e) { console.error("agent runs:", e); }
+  };
+  tick();
+  setInterval(tick, 2 * 60_000);
+}
+if (setupDone()) startLoop();
+else console.log("Первый запуск: открой доску и пройди мастер настройки");

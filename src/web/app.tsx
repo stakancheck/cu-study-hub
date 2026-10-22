@@ -22,7 +22,7 @@ interface State {
   today: { alerts: { level: string; course: string; text: string }[]; classes: ClassEv[]; deadlines72h: Item[]; top: Item[] };
   grades: Grade[];
   board: { columns: { id: Col; title: string }[]; cards: Card[] };
-  meta: { week: number | null; weeks: number; lateDaysBalance: number | null; lmsSyncedAt: string | null; calSyncedAt: string | null; lastSync: { errors: string[] } | null; syncing: boolean; calendarConfigured: boolean };
+  meta: { week: number | null; weeks: number; lateDaysBalance: number | null; lmsSyncedAt: string | null; calSyncedAt: string | null; lastSync: { errors: string[] } | null; syncing: boolean; calendarConfigured: boolean; setupDone: boolean };
 }
 
 interface AgentRun { id: string; card_id: string; dir: string; status: "running" | "done" | "failed"; started_at: string; finished_at: string | null; session_id: string | null; summary: string | null; cost_usd: number | null; mode: string }
@@ -85,11 +85,11 @@ function Progress({ g }: { g: Grade }) {
 }
 
 // ---------- app ----------
-type Route = { page: "today" } | { page: "board" } | { page: "week" } | { page: "settings" } | { page: "plan" } | { page: "course"; slug: string };
+type Route = { page: "today" } | { page: "board" } | { page: "week" } | { page: "settings" } | { page: "plan" } | { page: "setup" } | { page: "course"; slug: string };
 const parseHash = (): Route => {
   const h = location.hash.slice(1);
   if (h.startsWith("course-")) return { page: "course", slug: h.slice(7) };
-  if (h === "board" || h === "week" || h === "settings" || h === "plan") return { page: h };
+  if (h === "board" || h === "week" || h === "settings" || h === "plan" || h === "setup") return { page: h };
   return { page: "today" };
 };
 
@@ -119,6 +119,11 @@ function App() {
   if (!state) return <div className="page muted">Загружаю…</div>;
   const card = peek ? state.board.cards.find((c) => c.id === peek) : null;
   const go = (h: string) => (location.hash = h);
+  if (!state.meta.setupDone || route.page === "setup")
+    return <>
+      <Setup flash={flash} onDone={() => { go("today"); load(); }} />
+      {toast && <div className="toast">{toast}</div>}
+    </>;
 
   return (
     <div className="app">
@@ -178,7 +183,7 @@ function Today({ s, open, reload }: { s: State; open: (id: string) => void; relo
         ))}
 
         <h2 className="h">Пары</h2>
-        {!s.meta.calendarConfigured && <div className="callout blue"><span className="ci">🗓️</span><div>Календарь не подключён: добавь секцию <code>caldav</code> в <code>~/.cu-hub/config.yaml</code> (см. README).</div></div>}
+        {!s.meta.calendarConfigured && <div className="callout blue"><span className="ci">🗓️</span><div>Календарь не подключён: расписание пар и вердикты «идти на пару» появятся после подключения Яндекс Календаря в <a href="#settings">настройках</a>.</div></div>}
         <div className="list">
           {t.classes.length === 0 && s.meta.calendarConfigured && <div className="row muted">Сегодня пар нет</div>}
           {t.classes.map((c) => (
@@ -711,34 +716,23 @@ interface SettingsData {
 }
 const COLORS = ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"];
 
-function Settings({ reload, flash }: { reload: () => void; flash: (m: string) => void }) {
-  const [d, setD] = useState<SettingsData | null>(null);
-  const [cal, setCal] = useState({ url: "https://caldav.yandex.ru", username: "", calendars: [] as string[] });
+/** Yandex CalDAV connection: login, app password in Keychain, connection test, calendar choice. Shared by settings and setup. */
+function CalendarForm({ saved, onSaved, flash }: { saved: SettingsData["caldav"]; onSaved: (x: SettingsData, action: "password" | "save" | "disconnect") => Promise<void> | void; flash: (m: string) => void }) {
+  const [cal, setCal] = useState({ url: saved?.url ?? "https://caldav.yandex.ru", username: saved?.username ?? "", calendars: saved?.calendars ?? [] });
   const [password, setPassword] = useState("");
   const [found, setFound] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [general, setGeneral] = useState<SettingsData["general"] | null>(null);
-  const [dirty, setDirty] = useState(false);
-
-  const apply = (x: SettingsData) => {
-    setD(x);
-    setGeneral(x.general);
-    setCal({ url: x.caldav?.url ?? "https://caldav.yandex.ru", username: x.caldav?.username ?? "", calendars: x.caldav?.calendars ?? [] });
-    setDirty(false);
-  };
-  useEffect(() => { api<SettingsData>("/api/settings").then(apply); }, []);
-  if (!d || !general) return <div className="page muted">Загружаю…</div>;
+  useEffect(() => { setCal({ url: saved?.url ?? "https://caldav.yandex.ru", username: saved?.username ?? "", calendars: saved?.calendars ?? [] }); }, [saved]);
 
   const run = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
     try { await fn(); } catch (e) { flash((e as Error).message); } finally { setBusy(null); }
   };
-
   const savePassword = () => run("pw", async () => {
     await api("/api/settings/caldav-password", { method: "POST", json: { username: cal.username, password } });
     setPassword("");
     flash("Пароль сохранён в Keychain");
-    apply(await api<SettingsData>("/api/settings"));
+    await onSaved(await api<SettingsData>("/api/settings"), "password");
   });
   const test = () => run("test", async () => {
     const r = await api<{ calendars: string[] }>("/api/settings/caldav-test", { method: "POST", json: cal });
@@ -746,21 +740,94 @@ function Settings({ reload, flash }: { reload: () => void; flash: (m: string) =>
     flash(`Подключено: календарей ${r.calendars.length}`);
   });
   const saveCal = () => run("cal", async () => {
-    apply(await api<SettingsData>("/api/settings", { method: "PUT", json: { caldav: cal } }));
-    flash("Календарь сохранён. Синхронизирую…");
-    await api("/api/sync", { method: "POST" });
-    reload();
+    await onSaved(await api<SettingsData>("/api/settings", { method: "PUT", json: { caldav: cal } }), "save");
   });
   const disconnect = () => run("cal", async () => {
-    apply(await api<SettingsData>("/api/settings", { method: "PUT", json: { caldav: null } }));
     setFound(null);
-    reload();
+    await onSaved(await api<SettingsData>("/api/settings", { method: "PUT", json: { caldav: null } }), "disconnect");
   });
-  const saveAll = () => run("all", async () => {
-    apply(await api<SettingsData>("/api/settings", { method: "PUT", json: { general } }));
-    flash("Настройки сохранены");
+
+  return (
+    <>
+      <div className="fgrid">
+        <div className="field"><label htmlFor="cal-url">Сервер</label><input id="cal-url" className="input" value={cal.url} onChange={(e) => setCal({ ...cal, url: e.target.value })} /></div>
+        <div className="field"><label htmlFor="cal-user">Логин</label><input id="cal-user" className="input" placeholder="login@yandex.ru" value={cal.username} onChange={(e) => setCal({ ...cal, username: e.target.value })} /></div>
+      </div>
+      <div className="field">
+        <label htmlFor="cal-pw">Пароль приложения {saved?.hasPassword && cal.username === saved.username ? <Tag c="green">сохранён в Keychain</Tag> : <Tag>не сохранён</Tag>}</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input id="cal-pw" type="password" autoComplete="off" className="input" placeholder="16 символов" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button className="btn outline" disabled={!password || !cal.username || busy === "pw"} onClick={savePassword}>Сохранить в Keychain</button>
+        </div>
+      </div>
+      <div className="actions" style={{ margin: 0 }}>
+        <button className="btn outline" disabled={!cal.username || busy === "test"} onClick={test}>{busy === "test" ? "Подключаюсь…" : "Проверить подключение"}</button>
+        <button className="btn primary" disabled={!cal.username || busy === "cal"} onClick={saveCal}>Сохранить календарь</button>
+        {saved && <button className="btn" onClick={disconnect}>Отключить</button>}
+      </div>
+      {(found ?? cal.calendars).length > 0 && (
+        <div className="field">
+          <label>Какие календари читать (ничего не выбрано = все)</label>
+          <div className="checks">
+            {[...new Set([...(found ?? []), ...cal.calendars])].map((n) => (
+              <label key={n} className="check"><input type="checkbox" checked={cal.calendars.includes(n)}
+                onChange={(e) => setCal({ ...cal, calendars: e.target.checked ? [...cal.calendars, n] : cal.calendars.filter((x) => x !== n) })} />{n}</label>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Reminders, semester start and the study folder. Shared by settings and setup. */
+function GeneralFields({ general, set }: { general: SettingsData["general"]; set: (g: SettingsData["general"]) => void }) {
+  const rem = (patch: Partial<SettingsData["general"]["reminders"]>) => set({ ...general, reminders: { ...general.reminders, ...patch } });
+  return (
+    <>
+      <div className="fgrid">
+        <div className="field"><label htmlFor="g-digest">Утренний дайджест</label><input id="g-digest" type="time" className="input" value={general.reminders.digestAt} onChange={(e) => rem({ digestAt: e.target.value })} /></div>
+        <div className="field"><label htmlFor="g-before">Напомнить о паре за, мин</label><input id="g-before" type="number" min={5} max={180} className="input" value={general.reminders.beforeClassMin} onChange={(e) => rem({ beforeClassMin: Number(e.target.value) })} /></div>
+        <div className="field"><label htmlFor="g-weekly">Ревью недели</label><input id="g-weekly" className="input" placeholder="Sun 20:00" value={general.reminders.weeklyReviewAt} onChange={(e) => rem({ weeklyReviewAt: e.target.value })} /></div>
+        <div className="field"><label htmlFor="g-sync">Синхронизация, раз в N мин</label><input id="g-sync" type="number" min={5} className="input" value={general.syncIntervalMin} onChange={(e) => set({ ...general, syncIntervalMin: Number(e.target.value) })} /></div>
+      </div>
+      <div className="field"><label htmlFor="g-sem">Начало семестра (понедельник 1-й учебной недели): от него считается номер недели</label><input id="g-sem" type="date" className="input" style={{ maxWidth: 220 }} value={general.semesterStart} onChange={(e) => set({ ...general, semesterStart: e.target.value })} /></div>
+      <div className="field"><label htmlFor="g-ws">Папка для рабочих папок задач</label><input id="g-ws" className="input" value={general.workspaceRoot} onChange={(e) => set({ ...general, workspaceRoot: e.target.value })} /></div>
+    </>
+  );
+}
+
+function Settings({ reload, flash }: { reload: () => void; flash: (m: string) => void }) {
+  const [d, setD] = useState<SettingsData | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [general, setGeneral] = useState<SettingsData["general"] | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  const apply = (x: SettingsData) => {
+    setD(x);
+    setGeneral(x.general);
+    setDirty(false);
+  };
+  useEffect(() => { api<SettingsData>("/api/settings").then(apply); }, []);
+  if (!d || !general) return <div className="page muted">Загружаю…</div>;
+
+  const calSaved = async (x: SettingsData, action: string) => {
+    setD(x);
+    if (action === "password") return;
+    if (action === "save") {
+      flash("Календарь сохранён. Синхронизирую…");
+      await api("/api/sync", { method: "POST" });
+    }
     reload();
-  });
+  };
+  const saveAll = async () => {
+    setBusy(true);
+    try {
+      apply(await api<SettingsData>("/api/settings", { method: "PUT", json: { general } }));
+      flash("Настройки сохранены");
+      reload();
+    } catch (e) { flash((e as Error).message); } finally { setBusy(false); }
+  };
 
   return (
     <>
@@ -773,52 +840,19 @@ function Settings({ reload, flash }: { reload: () => void; flash: (m: string) =>
         <div className="section">
           <h2 className="h" style={{ margin: 0 }}>🗓️ Календарь</h2>
           <div className="muted">Яндекс Календарь по CalDAV. Нужен пароль приложения: Яндекс ID → Безопасность → Пароли приложений → «Календарь CalDAV».</div>
-          <div className="fgrid">
-            <div className="field"><label htmlFor="cal-url">Сервер</label><input id="cal-url" className="input" value={cal.url} onChange={(e) => setCal({ ...cal, url: e.target.value })} /></div>
-            <div className="field"><label htmlFor="cal-user">Логин</label><input id="cal-user" className="input" placeholder="login@yandex.ru" value={cal.username} onChange={(e) => setCal({ ...cal, username: e.target.value })} /></div>
-          </div>
-          <div className="field">
-            <label htmlFor="cal-pw">Пароль приложения {d.caldav?.hasPassword && cal.username === d.caldav.username ? <Tag c="green">сохранён в Keychain</Tag> : <Tag>не сохранён</Tag>}</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input id="cal-pw" type="password" autoComplete="off" className="input" placeholder="16 символов" value={password} onChange={(e) => setPassword(e.target.value)} />
-              <button className="btn outline" disabled={!password || !cal.username || busy === "pw"} onClick={savePassword}>Сохранить в Keychain</button>
-            </div>
-          </div>
-          <div className="actions" style={{ margin: 0 }}>
-            <button className="btn outline" disabled={!cal.username || busy === "test"} onClick={test}>{busy === "test" ? "Подключаюсь…" : "Проверить подключение"}</button>
-            <button className="btn primary" disabled={!cal.username || busy === "cal"} onClick={saveCal}>Сохранить календарь</button>
-            {d.caldav && <button className="btn" onClick={disconnect}>Отключить</button>}
-          </div>
-          {(found ?? cal.calendars).length > 0 && (
-            <div className="field">
-              <label>Какие календари читать (ничего не выбрано = все)</label>
-              <div className="checks">
-                {[...new Set([...(found ?? []), ...cal.calendars])].map((n) => (
-                  <label key={n} className="check"><input type="checkbox" checked={cal.calendars.includes(n)}
-                    onChange={(e) => setCal({ ...cal, calendars: e.target.checked ? [...cal.calendars, n] : cal.calendars.filter((x) => x !== n) })} />{n}</label>
-                ))}
-              </div>
-            </div>
-          )}
+          <CalendarForm saved={d.caldav} onSaved={calSaved} flash={flash} />
         </div>
 
-        <div className="callout" style={{ marginTop: 12 }}><span className="ci">📚</span><div>Название, цвет, ссылки и материалы курса меняются на странице самого курса: открой его в боковом меню.</div></div>
+        <div className="callout" style={{ marginTop: 12 }}><span className="ci">📚</span><div>Название, цвет, ссылки и материалы курса меняются на странице самого курса. Добавить или убрать курсы, перевойти в LMS: <a href="#setup">мастер настройки</a>.</div></div>
 
         <div className="section">
           <h2 className="h" style={{ margin: 0 }}>🔔 Напоминания и синхронизация</h2>
-          <div className="fgrid">
-            <div className="field"><label htmlFor="g-digest">Утренний дайджест</label><input id="g-digest" type="time" className="input" value={general.reminders.digestAt} onChange={(e) => { setGeneral({ ...general, reminders: { ...general.reminders, digestAt: e.target.value } }); setDirty(true); }} /></div>
-            <div className="field"><label htmlFor="g-before">Напомнить о паре за, мин</label><input id="g-before" type="number" min={5} max={180} className="input" value={general.reminders.beforeClassMin} onChange={(e) => { setGeneral({ ...general, reminders: { ...general.reminders, beforeClassMin: Number(e.target.value) } }); setDirty(true); }} /></div>
-            <div className="field"><label htmlFor="g-weekly">Ревью недели</label><input id="g-weekly" className="input" placeholder="Sun 20:00" value={general.reminders.weeklyReviewAt} onChange={(e) => { setGeneral({ ...general, reminders: { ...general.reminders, weeklyReviewAt: e.target.value } }); setDirty(true); }} /></div>
-            <div className="field"><label htmlFor="g-sync">Синхронизация, раз в N мин</label><input id="g-sync" type="number" min={5} className="input" value={general.syncIntervalMin} onChange={(e) => { setGeneral({ ...general, syncIntervalMin: Number(e.target.value) }); setDirty(true); }} /></div>
-          </div>
-          <div className="field"><label htmlFor="g-sem">Начало семестра (понедельник 1-й учебной недели): от него считается номер недели</label><input id="g-sem" type="date" className="input" style={{ maxWidth: 220 }} value={general.semesterStart} onChange={(e) => { setGeneral({ ...general, semesterStart: e.target.value }); setDirty(true); }} /></div>
-          <div className="field"><label htmlFor="g-ws">Папка для рабочих папок задач</label><input id="g-ws" className="input" value={general.workspaceRoot} onChange={(e) => { setGeneral({ ...general, workspaceRoot: e.target.value }); setDirty(true); }} /></div>
+          <GeneralFields general={general} set={(g) => { setGeneral(g); setDirty(true); }} />
           <div className="muted">Частота синхронизации применяется после перезапуска демона: <span className="mono">cu install</span>.</div>
         </div>
 
         <div className="savebar">
-          <button className="btn primary" disabled={!dirty || busy === "all"} onClick={saveAll}>{busy === "all" ? "Сохраняю…" : "Сохранить напоминания"}</button>
+          <button className="btn primary" disabled={!dirty || busy} onClick={saveAll}>{busy ? "Сохраняю…" : "Сохранить напоминания"}</button>
           {dirty && <span className="muted">Есть несохранённые изменения</span>}
         </div>
       </div>
@@ -1106,6 +1140,213 @@ function Plan({ courses, flash }: { courses: Grade[]; flash: (m: string) => void
         </table></div>
       </div>
     </>
+  );
+}
+
+// ---------- Setup wizard ----------
+interface SetupCourse {
+  id: number; name: string; category: string; archived: boolean; rule: "repo" | "user" | null; ruleFile: string | null;
+  tracked: boolean; short: string; color: string; totalWeight: number;
+  activities: { name: string; weight: number; planned: number; lateDays: boolean; kind: string }[];
+}
+interface SetupData {
+  done: boolean;
+  session: { ok: boolean; name: string | null };
+  login: { status: "idle" | "installing" | "waiting" | "ok" | "error"; error: string | null };
+  settings: SettingsData;
+  firstSync: { running: boolean; report: { errors: string[] } | null } | null;
+}
+const STEPS = ["Вход в LMS", "Курсы", "Учебный год", "Календарь", "Готово"];
+const RULE_TAG: Record<string, [string, string, string]> = {
+  repo: ["green", "по силлабусу", "Правила из rules/*.yaml: веса, блокеры и контрольные точки уже описаны"],
+  user: ["blue", "из LMS", "Правила созданы мастером из LMS, лежат в ~/.cu-hub/rules"],
+  none: ["yellow", "создадим из LMS", "Веса и число работ возьмём из LMS. Блокеры и контрольные точки добавишь по силлабусу"],
+};
+
+/** First-run setup: LMS session → courses → academic year and reminders → calendar → first sync. */
+function Setup({ onDone, flash }: { onDone: () => void; flash: (m: string) => void }) {
+  const [step, setStep] = useState(0);
+  const [d, setD] = useState<SetupData | null>(null);
+  const [courses, setCourses] = useState<SetupCourse[] | null>(null);
+  const [coursesErr, setCoursesErr] = useState<string | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  const [general, setGeneral] = useState<SettingsData["general"] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => api<SetupData>("/api/setup").then((x) => { setD(x); setGeneral((g) => g ?? x.settings.general); return x; }), []);
+  useEffect(() => { load(); }, [load]);
+  // While the LMS window is open, poll until the session appears.
+  const waiting = d?.login.status === "waiting" || d?.login.status === "installing";
+  const syncRunning = !!d?.firstSync?.running;
+  useEffect(() => {
+    if (!waiting && !syncRunning) return;
+    const t = setInterval(load, 2000);
+    return () => clearInterval(t);
+  }, [waiting, syncRunning, load]);
+  useEffect(() => {
+    if (step !== 1 || courses) return;
+    setCoursesErr(null);
+    api<SetupCourse[]>("/api/setup/courses").then(setCourses).catch((e) => setCoursesErr(e.message));
+  }, [step, courses]);
+
+  if (!d || !general) return <div className="page muted">Загружаю…</div>;
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try { await fn(); } catch (e) { flash((e as Error).message); } finally { setBusy(false); }
+  };
+  const login = () => run(async () => { await api("/api/setup/login", { method: "POST" }); await load(); });
+  const patch = (id: number, p: Partial<SetupCourse>) => setCourses((cs) => cs!.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  const picked = courses?.filter((c) => c.tracked) ?? [];
+  const saveCourses = () => run(async () => {
+    await api("/api/setup/courses", { method: "PUT", json: picked.map((c) => ({ id: c.id, short: c.short, color: c.color })) });
+    setStep(2);
+  });
+  const saveGeneral = () => run(async () => {
+    const x = await api<SettingsData>("/api/settings", { method: "PUT", json: { general } });
+    setD({ ...d, settings: x });
+    setStep(3);
+  });
+  const finish = () => run(async () => {
+    await api("/api/setup/finish", { method: "POST" });
+    await load();
+  });
+  const report = d.firstSync?.report ?? null;
+  const canGo = (i: number) => i === 0 || (d.session.ok && (i === 1 || (courses !== null && picked.length > 0 && i <= Math.max(step, 2))));
+
+  return (
+    <div className="setup">
+      <div className="page">
+        <div className="page-icon">🎓</div>
+        <div className="page-title">Настройка учебного штаба</div>
+        <div className="page-sub">Пара минут: войдём в LMS, выберем курсы, и доска соберётся сама. Всё хранится только на этом компьютере в <span className="mono">~/.cu-hub</span>.</div>
+
+        <ol className="steps">
+          {STEPS.map((t, i) => (
+            <li key={t}><button className={`step ${i === step ? "on" : ""} ${i < step ? "done" : ""}`} disabled={!canGo(i)} onClick={() => setStep(i)}>
+              <span className="n">{i < step ? "✓" : i + 1}</span>{t}
+            </button></li>
+          ))}
+        </ol>
+
+        {step === 0 && (
+          <div className="section">
+            <h2 className="h" style={{ margin: 0 }}>🔑 Вход в LMS</h2>
+            <div className="muted">Откроется отдельное окно Chromium со страницей LMS. Войди как обычно: логин и пароль вводишь только ты, программа их не видит и не хранит. Окно закроется само, когда вход получится.</div>
+            {d.session.ok ? (
+              <div className="callout" style={{ background: "var(--t-green)", color: "var(--t-green-fg)" }}><span className="ci">✅</span><div>Сессия LMS активна{d.session.name ? `: ${d.session.name}` : ""}.</div></div>
+            ) : d.login.status === "installing" ? (
+              <div className="callout blue"><span className="ci"><span className="spin">⟳</span></span><div>Скачиваю браузер Chromium для входа (около 150 МБ, только в первый раз)…</div></div>
+            ) : d.login.status === "waiting" ? (
+              <div className="callout blue"><span className="ci"><span className="spin">⟳</span></span><div>Жду, пока ты войдёшь в открывшемся окне. Если окна не видно, поищи его в Dock.</div></div>
+            ) : d.login.status === "error" ? (
+              <div className="callout red"><span className="ci">⚠️</span><div>{d.login.error}</div></div>
+            ) : null}
+            <div className="actions" style={{ margin: 0 }}>
+              {!d.session.ok && <button className="btn primary" disabled={busy || waiting} onClick={login}>{waiting ? "Окно входа открыто…" : "Войти в LMS"}</button>}
+              {d.session.ok && <button className="btn outline" disabled={busy || waiting} onClick={login}>Войти заново</button>}
+              {d.session.ok && <button className="btn primary" onClick={() => setStep(1)}>Дальше: курсы →</button>}
+            </div>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="section">
+            <h2 className="h" style={{ margin: 0 }}>📚 Курсы</h2>
+            <div className="muted">Это твои курсы из LMS. Отметь те, что нужно вести на доске, и задай короткое имя для меню. Оценка считается по весам активностей из LMS.</div>
+            {coursesErr && <div className="callout red"><span className="ci">⚠️</span><div>{coursesErr}</div></div>}
+            {!courses && !coursesErr && <div className="muted"><span className="spin">⟳</span> Загружаю курсы из LMS…</div>}
+            {courses && (
+              <div className="tbl-wrap"><table className="tbl">
+                <thead><tr><th></th><th>Курс</th><th>Короткое имя</th><th>Цвет</th><th>Правила</th></tr></thead>
+                <tbody>
+                  {courses.map((c) => {
+                    const [tc, tl, tt] = RULE_TAG[c.rule ?? "none"];
+                    return (
+                      <React.Fragment key={c.id}>
+                        <tr style={{ opacity: c.tracked ? 1 : 0.55 }}>
+                          <td><input type="checkbox" aria-label={`Вести курс ${c.name}`} checked={c.tracked} onChange={(e) => patch(c.id, { tracked: e.target.checked })} /></td>
+                          <td>
+                            <button className="linklike" onClick={() => setOpen(open === c.id ? null : c.id)} title="Показать активности и веса">{c.name}</button>
+                            <div className="muted" style={{ fontSize: 12 }}>
+                              {c.activities.length ? `${c.activities.length} активн. · сумма весов ${c.totalWeight}` : "нет оцениваемых активностей"}{c.archived ? " · архив" : ""}
+                            </div>
+                          </td>
+                          <td><input className="input" style={{ maxWidth: 150 }} aria-label="Короткое имя" value={c.short} onChange={(e) => patch(c.id, { short: e.target.value })} /></td>
+                          <td><div className="swatches">{COLORS.map((col) => <button key={col} title={col} aria-label={`Цвет ${col}`} className={`swatch sm c-${col} ${c.color === col ? "on" : ""}`} onClick={() => patch(c.id, { color: col })} />)}</div></td>
+                          <td><Tag c={tc} title={tt}>{tl}</Tag></td>
+                        </tr>
+                        {open === c.id && (
+                          <tr><td></td><td colSpan={4}>
+                            {c.activities.length ? (
+                              <table className="tbl mini-tbl"><tbody>
+                                {c.activities.map((a) => <tr key={a.name}><td>{a.name}</td><td className="num">вес {a.weight}</td><td className="num">работ {a.planned}</td><td>{a.lateDays ? "late days" : ""}</td></tr>)}
+                              </tbody></table>
+                            ) : <div className="muted">В LMS у курса нет активностей с весом: он попадёт на доску без оценки.</div>}
+                          </td></tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table></div>
+            )}
+            {courses && courses.some((c) => c.tracked && !c.rule) && (
+              <div className="callout yellow"><span className="ci">✍️</span><div>Для курсов с пометкой «создадим из LMS» появятся файлы в <span className="mono">~/.cu-hub/rules</span>. Блокеры (например, «экзамен ≥ 3.5») и контрольные точки по неделям есть только в силлабусе: их можно дописать потом, подсказки в <span className="mono">rules/README.md</span>.</div></div>
+            )}
+            <div className="actions" style={{ margin: 0 }}>
+              <button className="btn" onClick={() => setStep(0)}>← Назад</button>
+              <button className="btn primary" disabled={busy || !picked.length} onClick={saveCourses}>{busy ? "Сохраняю…" : `Сохранить курсы (${picked.length}) →`}</button>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="section">
+            <h2 className="h" style={{ margin: 0 }}>🗺️ Учебный год и напоминания</h2>
+            <div className="callout"><span className="ci">ℹ️</span><div>Сессия, каникулы и зачётная неделя берутся из <span className="mono">rules/_academic.yaml</span> (2026/27, Школа технологий). Если у тебя другой график, положи свою копию в <span className="mono">~/.cu-hub/rules/_academic.yaml</span>. Начало семестра можно поправить прямо здесь.</div></div>
+            <GeneralFields general={general} set={setGeneral} />
+            <div className="actions" style={{ margin: 0 }}>
+              <button className="btn" onClick={() => setStep(1)}>← Назад</button>
+              <button className="btn primary" disabled={busy} onClick={saveGeneral}>Дальше: календарь →</button>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="section">
+            <h2 className="h" style={{ margin: 0 }}>🗓️ Календарь (по желанию)</h2>
+            <div className="muted">Расписание пар из Яндекс Календаря по CalDAV: с ним появятся вердикты «идти на пару» и напоминания. Нужен пароль приложения: Яндекс ID → Безопасность → Пароли приложений → «Календарь CalDAV». Можно пропустить и подключить потом в настройках.</div>
+            <CalendarForm saved={d.settings.caldav} onSaved={(x) => setD({ ...d, settings: x })} flash={flash} />
+            <div className="actions" style={{ margin: 0 }}>
+              <button className="btn" onClick={() => setStep(2)}>← Назад</button>
+              <button className="btn primary" onClick={() => setStep(4)}>{d.settings.caldav ? "Дальше →" : "Пропустить →"}</button>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="section">
+            <h2 className="h" style={{ margin: 0 }}>🚀 Готово</h2>
+            <div className="muted">Первая синхронизация скачает задания и материалы выбранных курсов в <span className="mono">{general.workspaceRoot}</span>. Это может занять пару минут.</div>
+            <ul className="muted" style={{ margin: 0 }}>
+              <li>Курсов на доске: {picked.length || "?"}</li>
+              <li>Календарь: {d.settings.caldav ? d.settings.caldav.username : "не подключён"}</li>
+              <li>Начало семестра: {general.semesterStart}</li>
+            </ul>
+            {report && (report.errors.length
+              ? <div className="callout yellow"><span className="ci">⚠️</span><div>Синхронизация прошла с ошибками: {report.errors.join("; ")}. Доску уже можно открыть, остальное догонит фоновая синхронизация.</div></div>
+              : <div className="callout" style={{ background: "var(--t-green)", color: "var(--t-green-fg)" }}><span className="ci">✅</span><div>Всё синхронизировано.</div></div>)}
+            <div className="callout"><span className="ci">💡</span><div>Чтобы доска и напоминания работали в фоне после перезагрузки, выполни в терминале <span className="mono">cu install</span>. MCP-сервер для Claude Code уже прописан в <span className="mono">.mcp.json</span> проекта.</div></div>
+            <div className="actions" style={{ margin: 0 }}>
+              <button className="btn" onClick={() => setStep(3)}>← Назад</button>
+              {!report && <button className="btn primary" disabled={busy || syncRunning} onClick={finish}>{busy || syncRunning ? <><span className="spin">⟳</span> Синхронизирую…</> : "Синхронизировать и открыть доску"}</button>}
+              {report && <button className="btn primary" onClick={onDone}>Открыть доску →</button>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

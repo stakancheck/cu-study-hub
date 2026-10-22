@@ -95,7 +95,7 @@ export function classify(title: string, description = ""): { courseId: number | 
 
 export async function syncCalendar(): Promise<{ events: number; matched: number; calendars: string[] }> {
   const cfg = loadConfig().caldav;
-  if (!cfg) throw new Error("CalDAV не настроен: добавь секцию caldav в ~/.cu-hub/config.yaml");
+  if (!cfg) throw new Error("CalDAV не настроен: подключи календарь в «Настройках» на доске");
   const client = await createDAVClient({
     serverUrl: cfg.url,
     credentials: { username: cfg.username, password: keychainPassword(cfg.keychainService, cfg.username) },

@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CONFIG_FILE, DATA_DIR, loadConfig, ROOT } from "./config";
+import { DATA_DIR, loadConfig, ROOT, writeProjectMcp } from "./config";
 import { interactiveLogin } from "./connectors/lms/session";
 import { gradeAll } from "./core/engine";
 import { digestMarkdown, today, week } from "./core/planner";
@@ -17,7 +17,9 @@ const r2 = (n: number) => n.toFixed(2);
 
 const HELP = `Учебный штаб ЦУ
 
+  cu setup              мастер первой настройки в браузере: вход в LMS, курсы, календарь
   cu login              войти в LMS (откроется окно браузера)
+  cu courses            курсы из LMS: id, отслеживается ли, откуда правила
   cu sync               синхронизировать LMS, календарь, силлабусы
   cu today              дайджест на сегодня
   cu week               план недели
@@ -35,8 +37,32 @@ switch (cmd) {
   case "login": {
     console.log("Открываю браузер. Войди в LMS, окно закроется само.");
     await interactiveLogin();
+    const { setupDone } = await import("./core/setup");
+    if (!setupDone()) {
+      console.log("Готово, сессия сохранена. Дальше выбери курсы: cu setup");
+      break;
+    }
     console.log("Готово, сессия сохранена. Запускаю синхронизацию...");
     console.log(JSON.stringify(await syncAll(), null, 2));
+    break;
+  }
+  case "setup": {
+    const url = `http://localhost:${loadConfig().webPort}/#setup`;
+    const up = await fetch(`http://127.0.0.1:${loadConfig().webPort}/api/setup`).then((r) => r.ok).catch(() => false);
+    if (!up) await import("./web/server");
+    Bun.spawn(["open", url]);
+    console.log(`Мастер настройки: ${url}`);
+    break;
+  }
+  case "courses": {
+    const { setupCourses } = await import("./core/setup");
+    const { loadRules } = await import("./core/rules");
+    const tracked = new Set(loadRules().map((r) => r.lms_id));
+    for (const c of await setupCourses()) {
+      const src = c.rule === "repo" ? "силлабус" : c.rule === "user" ? "из LMS" : "нет правил";
+      console.log(`${tracked.has(c.id) ? "●" : "○"} ${String(c.id).padEnd(5)} ${c.name}  [${src}${c.ruleFile ? `: ${c.ruleFile.replace(homedir(), "~")}` : ""}] вес ${c.totalWeight}`);
+    }
+    console.log("\n● отслеживается. Добавить курс: cu setup (шаг «Курсы»)");
     break;
   }
   case "sync": {
@@ -115,19 +141,20 @@ switch (cmd) {
   case "calendars": {
     const { createDAVClient } = await import("tsdav");
     const cfg = loadConfig().caldav;
-    if (!cfg) { console.error(`Добавь секцию caldav в ${CONFIG_FILE}`); process.exit(1); }
+    if (!cfg) { console.error("Календарь не подключён: настрой его на доске (Настройки) или в мастере: cu setup"); process.exit(1); }
     const pw = Bun.spawnSync(["security", "find-generic-password", "-s", cfg.keychainService, "-a", cfg.username, "-w"]).stdout.toString().trim();
     const client = await createDAVClient({ serverUrl: cfg.url, credentials: { username: cfg.username, password: pw }, authMethod: "Basic", defaultAccountType: "caldav" });
     for (const c of await client.fetchCalendars()) console.log(`- ${c.displayName}  (${c.url})`);
     break;
   }
   case "install": {
+    writeProjectMcp();
     const plist = launchdPlist();
     mkdirSync(join(homedir(), "Library/LaunchAgents"), { recursive: true });
     writeFileSync(PLIST, plist);
     Bun.spawnSync(["launchctl", "unload", PLIST]);
     const r = Bun.spawnSync(["launchctl", "load", "-w", PLIST]);
-    console.log(r.exitCode === 0 ? `Демон установлен: ${PLIST}\nДоска: http://localhost:${loadConfig().webPort}` : r.stderr.toString());
+    console.log(r.exitCode === 0 ? `Демон установлен: ${PLIST}\nДоска: http://localhost:${loadConfig().webPort} (при первом запуске там откроется мастер настройки)` : r.stderr.toString());
     break;
   }
   case "uninstall":

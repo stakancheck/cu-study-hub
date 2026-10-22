@@ -1,7 +1,7 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
-import { loadConfig, onConfigChange, RULES_DIR } from "../config";
+import { loadConfig, onConfigChange, RULES_DIR, USER_RULES_DIR } from "../config";
 
 export type ActKind = "homework" | "test" | "project" | "exam" | "seminar" | "attendance" | "bonus";
 
@@ -64,21 +64,41 @@ export interface AcademicPeriod { title: string; kind: string; from: string; to:
 export interface AcademicCalendar { semester_start: string; semester_weeks: number; periods: AcademicPeriod[] }
 
 export function loadAcademic(): AcademicCalendar {
-  const f = join(RULES_DIR, "_academic.yaml");
-  return YAML.parse(readFileSync(f, "utf8"));
+  const own = join(USER_RULES_DIR, "_academic.yaml");
+  return YAML.parse(readFileSync(existsSync(own) ? own : join(RULES_DIR, "_academic.yaml"), "utf8"));
+}
+
+export type RuleSource = "repo" | "user";
+
+function readDir(dir: string, source: RuleSource) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".yaml") && !f.startsWith("_"))
+    .map((f) => ({ source, file: join(dir, f), rule: { graded: true, ...YAML.parse(readFileSync(join(dir, f), "utf8")) } as CourseRule }));
+}
+
+/** Every rule file: rules/*.yaml from the repo, then ~/.cu-hub/rules/*.yaml, which wins for the same lms_id. */
+export function allRuleFiles() {
+  const byId = new Map<number, { source: RuleSource; file: string; rule: CourseRule }>();
+  for (const x of [...readDir(RULES_DIR, "repo"), ...readDir(USER_RULES_DIR, "user")]) byId.set(x.rule.lms_id, x);
+  return [...byId.values()];
+}
+
+/** Rules for the courses this user tracks (all of them until the setup wizard picks some). */
+function trackedRules(): CourseRule[] {
+  const only = loadConfig().trackedCourses;
+  return allRuleFiles().map((x) => x.rule).filter((r) => !only || only.includes(r.lms_id));
 }
 
 let cache: CourseRule[] | null = null;
 onConfigChange(() => (cache = null));
 
-/** Rules from rules/*.yaml with the user's local overrides (names, colours, calendar patterns) applied. */
+/** Rules of tracked courses with the user's local overrides (names, colours, calendar patterns) applied. */
 export function loadRules(): CourseRule[] {
   if (cache) return cache;
   const overrides = loadConfig().courses;
-  cache = readdirSync(RULES_DIR)
-    .filter((f) => f.endsWith(".yaml") && !f.startsWith("_"))
-    .map((f) => {
-      const r = { graded: true, ...YAML.parse(readFileSync(join(RULES_DIR, f), "utf8")) } as CourseRule;
+  cache = trackedRules()
+    .map((r) => {
       const o = overrides[String(r.lms_id)];
       if (!o) return r;
       const calendar = o.calendarMatch?.length
@@ -91,9 +111,7 @@ export function loadRules(): CourseRule[] {
 
 /** Same rules without local overrides: the defaults shown in settings. */
 export function baseRules(): CourseRule[] {
-  return readdirSync(RULES_DIR)
-    .filter((f) => f.endsWith(".yaml") && !f.startsWith("_"))
-    .map((f) => ({ graded: true, ...YAML.parse(readFileSync(join(RULES_DIR, f), "utf8")) }) as CourseRule);
+  return trackedRules();
 }
 
 export function ruleByLmsId(id: number): CourseRule | undefined {
