@@ -8,16 +8,21 @@
 
 ```bash
 bun install
-bun cu login        # откроется окно Chromium: войди в LMS руками, окно закроется само
-bun cu today        # дайджест в терминале
-bun cu serve        # доска на http://localhost:4321
+bun link            # глобальная команда `cu` (bin в package.json)
+cu login            # откроется окно Chromium: войди в LMS руками, окно закроется само
+cu today            # дайджест в терминале
+cu serve            # доска на http://localhost:4321
 ```
 
 Автозапуск (демон: доска, синхронизация каждые 30 минут, напоминания, утренний дайджест):
 
 ```bash
-bun cu install
+cu install
 ```
+
+Если `bun link` падает с `AccessDenied` (папка `~/.bun/install` принадлежит root), хватит ссылки:
+`ln -sf ~/Projects/cu-study-hub/src/cli.ts ~/.bun/bin/cu`. Наш `cu` перекрывает системный `/usr/bin/cu`,
+потому что `~/.bun/bin` стоит в PATH раньше. Внутри папки проекта по-прежнему работает `bun cu ...`.
 
 ## Команды
 

@@ -17,16 +17,16 @@ const r2 = (n: number) => n.toFixed(2);
 
 const HELP = `Учебный штаб ЦУ
 
-  bun cu login              войти в LMS (откроется окно браузера)
-  bun cu sync               синхронизировать LMS, календарь, силлабусы
-  bun cu today              дайджест на сегодня
-  bun cu week               план недели
-  bun cu course [курс]      оценки по курсу (без аргумента: все)
-  bun cu do <задача>        создать рабочую папку для агента
-  bun cu serve              доска на localhost + фоновая синхронизация и напоминания
-  bun cu calendars          показать календари CalDAV (для настройки)
-  bun cu install            автозапуск демона через launchd
-  bun cu uninstall          убрать автозапуск`;
+  cu login              войти в LMS (откроется окно браузера)
+  cu sync               синхронизировать LMS, календарь, силлабусы
+  cu today              дайджест на сегодня
+  cu week               план недели
+  cu course [курс]      оценки по курсу (без аргумента: все)
+  cu do <задача>        создать рабочую папку для агента
+  cu serve              доска на localhost + фоновая синхронизация и напоминания
+  cu calendars          показать календари CalDAV (для настройки)
+  cu install            автозапуск демона через launchd
+  cu uninstall          убрать автозапуск`;
 
 switch (cmd) {
   case "login": {
