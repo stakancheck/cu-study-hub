@@ -20,9 +20,16 @@ blockers:
   - { label: "Проект 2 ≥ 3.5", activity: project, match: "проекта №2", min: 3.5 }
   - { label: "Экзамен ≥ 3.5", activity: exam, min: 3.5 }
 calendar:
-  match: ["сет"]
+  match: ["сет", "compnet"]
   kinds:
     seminar: { match: ["семинар", "практик"], activities: [seminar_tasks, defense] }
     lecture: { match: ["лекци"], activities: [], recording: true }
 prep:
   - { before: seminar, title: "Разобрать материалы недели и решить семинарскую задачу до защиты", effort_h: 1 }
+
+# Контрольные точки: хендбук «График контрольных работ» + тематический план силлабуса
+plan:
+  - { title: "Защита проекта 1", kind: project, week: 5 }
+  - { title: "Защита проекта 2", kind: project, week: 10 }
+  - { title: "Защита проекта 3", kind: project, week: 15 }
+  - { title: "Экзамен", kind: exam, period: session }

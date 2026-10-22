@@ -1,11 +1,13 @@
 import index from "./index.html";
-import { loadConfig } from "../config";
+import { type CaldavConfig, KEYCHAIN_DEFAULT, loadConfig, saveConfig } from "../config";
+import { hasKeychainPassword, listCalendars, setKeychainPassword } from "../connectors/caldav";
 import { markAttendance } from "../core/attendance";
 import { addManualCard, buildBoard, moveCard, updateCard } from "../core/board";
 import { getDb, getMeta } from "../core/db";
 import { gradeAll, whatIf } from "../core/engine";
 import { today, week } from "../core/planner";
-import { ruleBySlug } from "../core/rules";
+import { addPlanItem, deletePlanItem, planItems, semester, weekOf } from "../core/plan";
+import { baseRules, loadRules, ruleBySlug } from "../core/rules";
 import { createWorkspace } from "../core/workspace";
 import { runReminders, syncAll } from "../sync";
 
@@ -27,7 +29,65 @@ function coursePage(slug: string) {
     .query("SELECT id, name, ord, publish_date FROM themes WHERE course_id = ? ORDER BY ord")
     .all(rule.lms_id);
   const { cards } = buildBoard();
-  return { grade: g, rule: { slug: rule.slug, title: rule.title, assessment: rule.assessment, rounding: rule.rounding, ai: rule.ai_policy }, themes, cards: cards.filter((c) => c.courseId === rule.lms_id) };
+  return {
+    grade: g,
+    rule: { slug: rule.slug, title: rule.title, assessment: rule.assessment, rounding: rule.rounding, ai: rule.ai_policy },
+    themes,
+    cards: cards.filter((c) => c.courseId === rule.lms_id),
+    settings: courseSettings(rule.lms_id),
+  };
+}
+
+/** Defaults (rules + LMS) and the user's override for one course. */
+function courseSettings(id: number) {
+  const b = baseRules().find((r) => r.lms_id === id)!;
+  const row = getDb().query("SELECT name, syllabus_url, time_url FROM courses WHERE id = ?").get(id) as any;
+  return {
+    id, lmsName: row?.name ?? null,
+    defaults: { title: b.title, short: b.short, color: b.color, syllabusUrl: row?.syllabus_url ?? null, timeUrl: row?.time_url ?? null, calendarMatch: b.calendar?.match ?? [] },
+    override: loadConfig().courses[String(id)] ?? {},
+  };
+}
+
+function normCaldav(c: Partial<CaldavConfig>): CaldavConfig {
+  return {
+    url: (c.url || "https://caldav.yandex.ru").trim(),
+    username: String(c.username ?? "").trim(),
+    keychainService: c.keychainService || KEYCHAIN_DEFAULT,
+    calendars: Array.isArray(c.calendars) ? c.calendars.map(String) : [],
+  };
+}
+
+const s2 = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+/** Keep only fields that differ from rules defaults, so config.yaml stays small and readable. */
+function cleanCourses(input: Record<string, any>) {
+  const out: Record<string, unknown> = {};
+  for (const [id, o] of Object.entries(input)) {
+    const base = baseRules().find((r) => String(r.lms_id) === id);
+    const c: Record<string, unknown> = {};
+    const title = s2(o.title), short = s2(o.short), color = s2(o.color);
+    if (title && title !== base?.title) c.title = title;
+    if (short && short !== base?.short) c.short = short;
+    if (color && color !== base?.color) c.color = color;
+    if (s2(o.syllabusUrl)) c.syllabusUrl = s2(o.syllabusUrl);
+    if (s2(o.timeUrl)) c.timeUrl = s2(o.timeUrl);
+    const links = (o.links ?? []).filter((l: any) => s2(l?.url)).map((l: any) => ({ label: s2(l.label) ?? s2(l.url), url: s2(l.url) }));
+    if (links.length) c.links = links;
+    const cm = (o.calendarMatch ?? []).map(s2).filter(Boolean);
+    if (cm.length) c.calendarMatch = cm;
+    if (Object.keys(c).length) out[id] = c;
+  }
+  return out;
+}
+
+function settingsPayload() {
+  const c = loadConfig();
+  const data = {
+    general: { semesterStart: semester().start, workspaceRoot: c.workspaceRoot, syncIntervalMin: c.syncIntervalMin, reminders: c.reminders, webPort: c.webPort },
+    caldav: c.caldav ? { ...c.caldav, hasPassword: hasKeychainPassword(c.caldav.keychainService, c.caldav.username) } : null,
+  };
+  return data;
 }
 
 const server = Bun.serve({
@@ -42,13 +102,84 @@ const server = Bun.serve({
         today: today(),
         grades,
         board: buildBoard(grades),
-        meta: { lateDaysBalance: Number(getMeta("lateDaysBalance")) || null, lmsSyncedAt: getMeta("lmsSyncedAt"), calSyncedAt: getMeta("calSyncedAt"), lastSync: JSON.parse(getMeta("lastSyncReport") ?? "null"), syncing: !!syncing, calendarConfigured: !!cfg.caldav },
+        meta: { week: weekOf(), weeks: semester().weeks, lateDaysBalance: Number(getMeta("lateDaysBalance")) || null, lmsSyncedAt: getMeta("lmsSyncedAt"), calSyncedAt: getMeta("calSyncedAt"), lastSync: JSON.parse(getMeta("lastSyncReport") ?? "null"), syncing: !!syncing, calendarConfigured: !!loadConfig().caldav },
       });
     },
     "/api/week": () => ok(week()),
     "/api/course/:slug": (req) => {
       const p = coursePage(req.params.slug);
       return p ? ok(p) : fail(new Error("not found"), 404);
+    },
+    "/api/course/:slug/settings": {
+      PUT: async (req) => {
+        const rule = ruleBySlug(req.params.slug);
+        if (!rule) return fail(new Error("not found"), 404);
+        const id = String(rule.lms_id);
+        const courses = { ...loadConfig().courses };
+        delete courses[id];
+        Object.assign(courses, cleanCourses({ [id]: await req.json() }));
+        saveConfig({ courses });
+        return ok(courseSettings(rule.lms_id));
+      },
+    },
+    "/api/settings": {
+      GET: () => ok(settingsPayload()),
+      PUT: async (req) => {
+        const body = await req.json();
+        const patch: Record<string, unknown> = {};
+        if (body.general) {
+          const g = body.general;
+          if (g.workspaceRoot) patch.workspaceRoot = String(g.workspaceRoot);
+          if (g.syncIntervalMin) patch.syncIntervalMin = Math.max(5, Number(g.syncIntervalMin));
+          if (g.reminders) patch.reminders = g.reminders;
+          if (g.semesterStart !== undefined) patch.semesterStart = /^\d{4}-\d{2}-\d{2}$/.test(g.semesterStart) ? g.semesterStart : null;
+        }
+        if (body.caldav !== undefined) patch.caldav = body.caldav === null ? null : normCaldav(body.caldav);
+        saveConfig(patch);
+        return ok(settingsPayload());
+      },
+    },
+    "/api/settings/caldav-password": {
+      POST: async (req) => {
+        try {
+          const { username, password, keychainService } = await req.json();
+          if (!username || !password) throw new Error("Нужны логин и пароль приложения");
+          setKeychainPassword(keychainService || KEYCHAIN_DEFAULT, username, password);
+          return ok();
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+    },
+    "/api/settings/caldav-test": {
+      POST: async (req) => {
+        try {
+          return ok({ calendars: await listCalendars(normCaldav(await req.json())) });
+        } catch (e) {
+          return fail(e, 400);
+        }
+      },
+    },
+    "/api/plan": {
+      GET: (req) => {
+        const u = new URL(req.url);
+        const from = u.searchParams.get("from") ?? "2026-08-01";
+        const to = u.searchParams.get("to") ?? "2027-08-31";
+        return ok({ semester: semester(), items: planItems(from, to) });
+      },
+      POST: async (req) => {
+        const b = await req.json();
+        if (!b.title || !b.from) return fail(new Error("Нужны название и дата"), 400);
+        return ok({ id: addPlanItem({ title: String(b.title), kind: b.kind ?? "other", courseId: b.courseId ?? null, from: b.from, to: b.to || b.from, note: b.note }) });
+      },
+    },
+    "/api/plan/:id": {
+      DELETE: (req) => {
+        const id = decodeURIComponent(req.params.id);
+        if (!id.startsWith("manual:")) return fail(new Error("Удалять можно только свои отметки"), 400);
+        deletePlanItem(id);
+        return ok();
+      },
     },
     "/api/sync": { POST: async () => ok(await doSync()) },
     "/api/whatif": {
@@ -68,7 +199,11 @@ const server = Bun.serve({
     "/api/cards/:id/move": {
       POST: async (req) => {
         const { col, ord } = await req.json();
-        moveCard(decodeURIComponent(req.params.id), col, ord);
+        try {
+          moveCard(decodeURIComponent(req.params.id), col, ord);
+        } catch (e) {
+          return fail(e, 409);
+        }
         return ok();
       },
     },
@@ -100,7 +235,7 @@ const server = Bun.serve({
     "/api/open": {
       POST: async (req) => {
         const { path } = await req.json();
-        if (typeof path === "string" && path.startsWith(cfg.workspaceRoot)) Bun.spawn(["open", path]);
+        if (typeof path === "string" && path.startsWith(loadConfig().workspaceRoot)) Bun.spawn(["open", path]);
         return ok();
       },
     },

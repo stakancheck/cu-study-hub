@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 
 export const ROOT = join(import.meta.dir, "..");
@@ -14,19 +14,42 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 export const LMS_ORIGIN = "https://my.centraluniversity.ru";
 
+export interface CourseLink {
+  label: string;
+  url: string;
+}
+
+/** Per-course local overrides layered over rules/*.yaml and LMS data. Keyed by LMS course id. */
+export interface CourseOverride {
+  title?: string;
+  short?: string;
+  color?: string;
+  syllabusUrl?: string;
+  timeUrl?: string;
+  /** extra materials: repo, drive, recordings, ... */
+  links?: CourseLink[];
+  /** extra calendar title patterns (regex), added to rules calendar.match */
+  calendarMatch?: string[];
+}
+
+export interface CaldavConfig {
+  url: string;
+  username: string;
+  /** macOS Keychain service name holding the app password */
+  keychainService: string;
+  /** calendar display names to read; empty = all */
+  calendars?: string[];
+}
+
 export interface HubConfig {
   workspaceRoot: string;
   webPort: number;
   syncIntervalMin: number;
-  caldav?: {
-    url: string;
-    username: string;
-    /** macOS Keychain service name holding the app password */
-    keychainService: string;
-    /** calendar display names to read; empty = all */
-    calendars?: string[];
-  };
+  /** Monday of academic week 1; defaults to rules/_academic.yaml */
+  semesterStart?: string;
+  caldav?: CaldavConfig;
   reminders: { beforeClassMin: number; digestAt: string; weeklyReviewAt: string };
+  courses: Record<string, CourseOverride>;
 }
 
 const DEFAULTS: HubConfig = {
@@ -34,17 +57,46 @@ const DEFAULTS: HubConfig = {
   webPort: 4321,
   syncIntervalMin: 30,
   reminders: { beforeClassMin: 40, digestAt: "08:00", weeklyReviewAt: "Sun 20:00" },
+  courses: {},
 };
 
 export const CONFIG_FILE = join(DATA_DIR, "config.yaml");
 
+function readUser(): Partial<HubConfig> {
+  if (!existsSync(CONFIG_FILE)) return {};
+  return YAML.parse(readFileSync(CONFIG_FILE, "utf8")) ?? {};
+}
+
 export function loadConfig(): HubConfig {
-  if (!existsSync(CONFIG_FILE)) return DEFAULTS;
-  const user = YAML.parse(readFileSync(CONFIG_FILE, "utf8")) ?? {};
+  const user = readUser();
   return {
     ...DEFAULTS,
     ...user,
     workspaceRoot: (user.workspaceRoot ?? DEFAULTS.workspaceRoot).replace(/^~/, homedir()),
     reminders: { ...DEFAULTS.reminders, ...(user.reminders ?? {}) },
+    courses: user.courses ?? {},
   };
 }
+
+export function courseOverride(lmsId: number): CourseOverride {
+  return loadConfig().courses[String(lmsId)] ?? {};
+}
+
+const listeners = new Set<() => void>();
+export function onConfigChange(fn: () => void) {
+  listeners.add(fn);
+}
+
+/** Shallow-merge a patch into the user's config.yaml. `null` removes a key. */
+export function saveConfig(patch: Partial<Record<keyof HubConfig, unknown>>) {
+  const user: Record<string, unknown> = { ...readUser() };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete user[k];
+    else if (v !== undefined) user[k] = v;
+  }
+  writeFileSync(CONFIG_FILE, YAML.stringify(user), { mode: 0o600 });
+  for (const fn of listeners) fn();
+}
+
+const KEYCHAIN_DEFAULT = "cu-hub-caldav";
+export { KEYCHAIN_DEFAULT };

@@ -4,6 +4,7 @@ import { type CourseGrade, gradeAll, lmsUrl, type WorkItem, workItems } from "./
 import { ruleByLmsId } from "./rules";
 
 export const COLUMNS = [
+  { id: "overdue", title: "Просрочено" },
   { id: "inbox", title: "Входящие" },
   { id: "week", title: "Эта неделя" },
   { id: "today", title: "Сегодня" },
@@ -97,9 +98,12 @@ export function buildBoard(grades: CourseGrade[] = gradeAll()) {
     }
     if (it.state === "notCreated" && it.deadline && new Date(it.deadline).getTime() < now) continue;
     if (it.state === "backlog" && it.deadline && new Date(it.deadline).getTime() < now - (it.lateDaysAllowed ? 7 * 24 * HOUR : 0)) continue;
+    if (it.state === "overdue") { const l = loc.get(it.id); if (l?.hidden) continue; cards.push(itemCard(it, (l?.col as ColumnId) ?? "overdue", l)); continue; }
     const l = loc.get(it.id);
     if (l?.hidden) continue;
-    const col = (auto && auto !== "doing") ? auto : ((l?.col as ColumnId) ?? auto ?? byDeadline(it.deadline));
+    // Past the deadline but still open (LMS has not failed it yet): same «Просрочено» column.
+    const pastDue = !auto && it.deadline && new Date(it.deadline).getTime() < now;
+    const col = (auto && auto !== "doing") ? auto : ((l?.col as ColumnId) ?? auto ?? (pastDue ? "overdue" : byDeadline(it.deadline)));
     cards.push(itemCard(it, col, l));
   }
 
@@ -167,9 +171,17 @@ function eventCard(e: ClassEvent, col: ColumnId, l?: LocalCard): Card {
   };
 }
 
+/** LMS owns these states: the card sits in review/done until LMS itself changes the status. */
+export const LMS_LOCKED: Record<string, string> = { submitted: "Отправлено", review: "На проверке", evaluated: "Оценено", failed: "Не сдано" };
+
 export function moveCard(id: string, col: ColumnId, ord?: number) {
   const kind = id.split(":")[0];
   const db = getDb();
+  if (kind === "task") {
+    const it = workItems().find((i) => i.id === id);
+    if (it && LMS_LOCKED[it.state] && LMS_AUTO[it.state] !== col)
+      throw new Error(`Статус «${LMS_LOCKED[it.state]}» приходит из LMS, карточку нельзя передвинуть, пока он не изменится там.`);
+  }
   if (kind === "manual") {
     db.query("UPDATE cards SET col=?, done=?, ord=COALESCE(?, ord), updated_at=datetime('now') WHERE id=?").run(col, col === "done" ? 1 : 0, ord ?? null, id);
     return;

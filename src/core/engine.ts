@@ -1,9 +1,24 @@
+import { type CourseLink, courseOverride } from "../config";
 import { getDb, getMeta } from "./db";
 import { type ActivityRule, type CourseRule, loadRules, norm, ruleByLmsId } from "./rules";
 
 const DONE = new Set(["evaluated", "failed"]);
 const WAITING = new Set(["submitted", "review"]);
-const OPEN = new Set(["backlog", "inProgress", "notCreated", "rejected"]);
+const OPEN = new Set(["backlog", "inProgress", "notCreated", "rejected", "overdue"]);
+const LD_MAX_DAYS = 7;
+
+/**
+ * LMS auto-fails an unsubmitted task at the deadline (state "failed", score 0, no submitAt/evaluateAt),
+ * but late days can still move the deadline up to 7 days back. Such a task is not lost yet.
+ */
+export function isRescuable(t: { state: string; score: number | null; submit_at: string | null; evaluate_at?: string | null; late_days_enabled: number; deadline: string | null }, now = Date.now()) {
+  if (t.state !== "failed" || (t.score ?? 0) > 0 || t.submit_at || t.evaluate_at || !t.late_days_enabled || !t.deadline) return false;
+  const dl = new Date(t.deadline).getTime();
+  return now > dl && now < dl + LD_MAX_DAYS * 24 * HOUR && now < new Date(LD_HARD_LIMIT).getTime();
+}
+
+/** Late days needed to submit right now: each started day past the deadline costs one. */
+export const ldNeededNow = (deadline: string, now = Date.now()) => Math.max(1, Math.ceil((now - new Date(deadline).getTime()) / (24 * HOUR)));
 const HOUR = 3_600_000;
 
 interface ExerciseRow {
@@ -12,7 +27,7 @@ interface ExerciseRow {
 }
 interface TaskRow {
   id: number; exercise_id: number; course_id: number; state: string; score: number | null;
-  extra_score: number | null; deadline: string | null; submit_at: string | null; late_days: number | null;
+  extra_score: number | null; deadline: string | null; submit_at: string | null; evaluate_at: string | null; late_days: number | null;
   late_days_enabled: number;
 }
 interface LmsActivityRow {
@@ -64,6 +79,7 @@ export interface CourseGrade {
   aiNote: string;
   syllabusUrl: string | null;
   timeUrl: string | null;
+  links: CourseLink[];
 }
 
 export interface WorkItem {
@@ -119,6 +135,7 @@ export function gradeCourse(rule: CourseRule): CourseGrade | null {
   const db = getDb();
   const course = db.query("SELECT * FROM courses WHERE id = ?").get(rule.lms_id) as any;
   if (!course) return null;
+  const ov = courseOverride(rule.lms_id);
   const { acts, exercises, tasks } = loadCourseData(rule.lms_id);
   const exById = new Map(exercises.map((e) => [e.id, e]));
   const warnings: string[] = [];
@@ -137,7 +154,7 @@ export function gradeCourse(rule: CourseRule): CourseGrade | null {
       const ex = exById.get(t.exercise_id);
       return ex && la && ex.activity_id === la.id;
     });
-    let graded = own.filter((t) => DONE.has(t.state));
+    let graded = own.filter((t) => DONE.has(t.state) && !isRescuable(t));
     let scores = graded.map((t) => {
       const ex = exById.get(t.exercise_id)!;
       return { name: ex.name, score: (((t.score ?? 0) + (t.extra_score ?? 0)) / (ex.max_score || 10)) * 10 };
@@ -188,7 +205,7 @@ export function gradeCourse(rule: CourseRule): CourseGrade | null {
     threshold, earned, lost, remaining, maxReachable, bonusLeft, neededShare, status,
     activities, blockers, warnings, waiting, rounding: rule.rounding,
     aiMode: rule.ai_policy.mode, aiNote: rule.ai_policy.note,
-    syllabusUrl: course.syllabus_url, timeUrl: course.time_url,
+    syllabusUrl: ov.syllabusUrl || course.syllabus_url, timeUrl: ov.timeUrl || course.time_url, links: ov.links ?? [],
   };
 }
 
@@ -204,7 +221,11 @@ function evalBlocker(
     exercises.filter((e) => la && e.activity_id === la.id && (!b.match || norm(e.name).includes(norm(b.match)))).map((e) => e.id),
   );
   const own = tasks.filter((t) => exIds.has(t.exercise_id));
-  const done = own.filter((t) => DONE.has(t.state));
+  const rescue = own.filter((t) => isRescuable(t));
+  const done = own.filter((t) => DONE.has(t.state) && !isRescuable(t));
+  const rescueNote = rescue.length
+    ? `; просрочено, но можно спасти за ${ldNeededNow(rescue[0].deadline!)} LD до ${new Date(new Date(rescue[0].deadline!).getTime() + LD_MAX_DAYS * 24 * HOUR).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}`
+    : "";
   const val = (t: TaskRow) => (t.score ?? 0) + (t.extra_score ?? 0);
 
   if (b.all_submitted) {
@@ -225,10 +246,11 @@ function evalBlocker(
     const slack = good + possible - b.count;
     return {
       label: b.label, status: slack <= 1 ? "risk" : "pending",
-      detail: `${good} из ${b.count}; можно провалить ещё ${slack} из ${possible}`,
+      detail: `${good} из ${b.count}; можно провалить ещё ${slack} из ${possible}${rescueNote}`,
     };
   }
 
+  if (!done.length && rescue.length) return { label: b.label, status: "risk", detail: `оценки нет${rescueNote}` };
   if (!done.length) {
     const overdue = exercises.some((e) => exIds.has(e.id) && e.deadline && new Date(e.deadline).getTime() < Date.now());
     return { label: b.label, status: overdue ? "risk" : "pending", detail: overdue ? "дедлайн прошёл, оценки нет" : "впереди" };
@@ -265,7 +287,7 @@ export function workItems(grades = gradeAll()): WorkItem[] {
       const graded = rule.graded !== false;
       if (graded && !ar) continue; // weightless activities (перезачёт и т.п.)
       const t = taskByEx.get(ex.id);
-      const state = t?.state ?? "notCreated";
+      const state = t && isRescuable(t) ? "overdue" : (t?.state ?? "notCreated");
       const ag = ar ? g.activities.find((a) => a.key === ar.key) : undefined;
       const blocker = rule.blockers.find(
         (b) => b.activity === ar?.key && (!b.match || norm(ex.name).includes(norm(b.match))),
@@ -296,7 +318,8 @@ export function priority(it: WorkItem, pressure: number): number {
   // Urgency by slack: calendar time left minus ~2x the work itself, in days.
   let urgency: number;
   if (it.hoursLeft == null) urgency = 0.02;
-  else if (it.hoursLeft < 0) urgency = it.lateDaysAllowed && it.hoursLeft > -168 ? 1 : 0.01;
+  // Overdue but rescuable: every extra day costs one more late day and the 7-day window closes.
+  else if (it.hoursLeft < 0) urgency = it.state === "overdue" ? 1.5 : it.lateDaysAllowed && it.hoursLeft > -168 ? 1 : 0.01;
   else urgency = 1 / Math.max((it.hoursLeft - it.effortH * 2) / 24 + 1, 0.25);
   const value = Math.max(it.delta, 0.05);
   const effort = Math.max(it.effortH, 0.25);
@@ -359,6 +382,16 @@ export function adviseLateDays(it: WorkItem): LateDayAdvice {
   if (!it.deadline) return { allowed: true, balance: bal, suggestDays: 0, latestDate: null, reasoning: "У задачи нет дедлайна." };
   const dl = new Date(it.deadline).getTime();
   const latest = Math.min(dl + 7 * 24 * HOUR, new Date(LD_HARD_LIMIT).getTime());
+  if (Date.now() > dl) {
+    const n = ldNeededNow(it.deadline);
+    const t = new Date(dl).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    const close = new Date(latest).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+    return {
+      allowed: true, balance: bal, suggestDays: n, latestDate: new Date(latest).toISOString(),
+      reasoning: `Дедлайн прошёл, но работу ещё можно спасти: ${n} LD, если сдать сегодня до ${t}; завтра понадобится ${n + 1}. ` +
+        `Окно закрывается ${close}. Перенеси дедлайн в LMS (значок календаря у задачи в «Архивных заданиях»), потом сдавай. Работа стоит ${it.delta.toFixed(2)} балла.`,
+    };
+  }
   const effortDays = Math.ceil(it.effortH / 3);
   const hoursLeft = (dl - Date.now()) / HOUR;
   const need = Math.max(0, Math.ceil((it.effortH * 2 - Math.max(hoursLeft, 0)) / 24));

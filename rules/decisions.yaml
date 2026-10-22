@@ -27,3 +27,11 @@ calendar:
     seminar: { match: [".*"], activities: [activity, case] }
 prep:
   - { before: seminar, title: "Повторить инструмент прошлого занятия, принести ДЗ", effort_h: 0.3 }
+
+# Контрольные точки: хендбук «График контрольных работ», Школа технологий
+plan:
+  - { title: "Кейс", kind: test, week: 3 }
+  - { title: "Кейс", kind: test, week: 5 }
+  - { title: "Кейс", kind: test, week: 8 }
+  - { title: "Итоговый проект", kind: project, week: 15 }
+  - { title: "Зачёт", kind: exam, period: credit }

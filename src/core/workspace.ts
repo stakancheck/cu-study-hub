@@ -131,7 +131,13 @@ MCP-сервер cu-hub: \`task_context\`, \`course_grades\`, \`late_days_advice
 `;
 
   writeFileSync(join(dir, "BRIEF.md"), brief);
-  writeFileSync(join(dir, "MATERIALS.md"), `# Материалы темы «${it.theme}»\n\n${repos.length ? `Репозитории:\n${cloneNotes.join("\n") || repos.map((r) => `- ${r}`).join("\n")}\n\n` : ""}${materials}`);
+  const courseLinks = [
+    ...(g.syllabusUrl ? [{ label: "Силлабус", url: g.syllabusUrl.replace("note.cu.ru", "cuhandlog.ru") }] : []),
+    ...(g.timeUrl ? [{ label: "Канал в TiMe", url: g.timeUrl }] : []),
+    ...g.links,
+  ];
+  const linksMd = courseLinks.length ? `Ссылки курса:\n${courseLinks.map((l) => `- [${l.label}](${l.url})`).join("\n")}\n\n` : "";
+  writeFileSync(join(dir, "MATERIALS.md"), `# Материалы темы «${it.theme}»\n\n${linksMd}${repos.length ? `Репозитории:\n${cloneNotes.join("\n") || repos.map((r) => `- ${r}`).join("\n")}\n\n` : ""}${materials}`);
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd);
   // Make the folder a self-contained Claude Code project: MCP + /defend.
   writeFileSync(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { "cu-hub": { command: "bun", args: [join(ROOT, "src/mcp/server.ts")] } } }, null, 2));

@@ -28,3 +28,11 @@ calendar:
     lecture: { match: ["лекци"], activities: [], recording: true }
 prep:
   - { before: seminar, title: "Пролистать лекцию недели и шаблоны артефактов", effort_h: 0.3 }
+
+# В графике хендбука курса нет; силлабус: 4 промежуточных оценочных занятия после каждого блока (3, 5, 5, 2 темы)
+plan:
+  - { title: "Проект, часть 1 (блок «Требования»)", kind: project, week: 3, approx: true }
+  - { title: "Проект, часть 2 (блок «Проектирование»)", kind: project, week: 8, approx: true }
+  - { title: "Проект, часть 3 (блок «Реализация»)", kind: project, week: 13, approx: true }
+  - { title: "Проект, часть 4 (блок «Сопровождение»)", kind: project, week: 15, approx: true }
+  - { title: "Экзамен: защита кейса", kind: exam, period: session }

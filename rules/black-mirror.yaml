@@ -24,3 +24,8 @@ calendar:
     seminar: { match: [".*"], activities: [classwork] }
 prep:
   - { before: seminar, title: "Посмотреть фильм/фрагменты к семинару", effort_h: 2 }
+
+# Контрольные точки: хендбук «График контрольных работ», Школа технологий
+plan:
+  - { title: "Итоговый проект (видео)", kind: project, weeks: [13, 15] }
+  - { title: "Зачёт", kind: exam, period: credit }

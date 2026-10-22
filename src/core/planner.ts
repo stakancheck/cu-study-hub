@@ -1,6 +1,7 @@
 import { classes, type ClassEvent, VERDICT_LABEL } from "./attendance";
 import { getMeta } from "./db";
-import { adviseLateDays, type CourseGrade, gradeAll, openItems, recoverable, type WorkItem, workItems } from "./engine";
+import { semester, weekOf } from "./plan";
+import { adviseLateDays, type CourseGrade, gradeAll, ldNeededNow, openItems, recoverable, type WorkItem, workItems } from "./engine";
 
 const HOUR = 3_600_000;
 
@@ -31,6 +32,7 @@ export function alerts(grades: CourseGrade[]): Alert[] {
 export function today() {
   const grades = gradeAll();
   const items = workItems(grades);
+  const rescue = items.filter((i) => i.state === "overdue").sort((a, b) => b.priority - a.priority);
   const open = openItems(items);
   const sod = startOfDay();
   const eod = new Date(sod.getTime() + 24 * HOUR);
@@ -40,17 +42,21 @@ export function today() {
     date: new Date().toISOString(),
     lateDaysBalance: Number(getMeta("lateDaysBalance") ?? NaN) || null,
     syncedAt: { lms: getMeta("lmsSyncedAt"), calendar: getMeta("calSyncedAt") },
-    alerts: alerts(grades),
+    alerts: [
+      ...rescue.map((i) => ({ level: (i.blocker ? "crit" : "warn") as Alert["level"], course: i.course,
+        text: `«${i.title}» просрочено, но спасается за ${ldNeededNow(i.deadline!)} LD сегодня (+${i.delta.toFixed(2)}${i.blocker ? `, блокер «${i.blocker}»` : ""}).` })),
+      ...alerts(grades),
+    ],
     classes: todays,
     deadlines72h: soon,
-    top: open.slice(0, 3).map((i) => ({ ...i, lateDayAdvice: i.hoursLeft != null && i.hoursLeft < 36 ? adviseLateDays(i) : null })),
+    top: open.slice(0, 3).map((i) => ({ ...i, lateDayAdvice: i.hoursLeft != null && i.hoursLeft < 36 && i.lateDaysAllowed ? adviseLateDays(i) : null })),
     courses: grades.map((g) => ({ id: g.id, short: g.short, status: g.status, earned: g.earned, maxReachable: g.maxReachable, threshold: g.threshold })),
   };
 }
 
 export interface DayPlan { date: string; classes: ClassEvent[]; due: WorkItem[]; loadH: number; overloaded: boolean; suggestions: string[] }
 
-export function week(): { days: DayPlan[]; recoverable: WorkItem[] } {
+export function week(): { week: number | null; weeks: number; days: DayPlan[]; recoverable: WorkItem[] } {
   const grades = gradeAll();
   const items = workItems(grades);
   const open = openItems(items);
@@ -70,7 +76,7 @@ export function week(): { days: DayPlan[]; recoverable: WorkItem[] } {
     }
     days.push({ date: from.toISOString(), classes: cls, due, loadH, overloaded: loadH > 8, suggestions });
   }
-  return { days, recoverable: recoverable(items) };
+  return { week: weekOf(), weeks: semester().weeks, days, recoverable: recoverable(items) };
 }
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
@@ -79,7 +85,8 @@ const fmtDue = (iso: string | null) =>
 
 export function digestMarkdown(t = today()): string {
   const lines: string[] = [];
-  lines.push(`# Сегодня, ${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}`);
+  const wk = weekOf();
+  lines.push(`# Сегодня, ${new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}${wk ? ` · неделя ${wk} из ${semester().weeks}` : ""}`);
   if (t.lateDaysBalance != null) lines.push(`Late days на балансе: **${t.lateDaysBalance}**`);
   const crit = t.alerts.filter((a) => a.level !== "info");
   if (crit.length) {

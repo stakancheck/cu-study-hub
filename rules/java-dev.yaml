@@ -27,3 +27,11 @@ calendar:
     lecture: { match: ["лекци"], activities: [], recording: true }
 prep:
   - { before: seminar, title: "Прочитать материалы недели и прогнать пример с лекции", effort_h: 0.5 }
+
+# Контрольные точки по неделям: хендбук «График контрольных работ осеннего семестра [2026–2027]», Школа технологий
+plan:
+  - { title: "Контрольная работа 1", kind: test, week: 6 }
+  - { title: "Контрольная работа 2", kind: test, week: 10 }
+  - { title: "Контрольная работа 3", kind: test, week: 14 }
+  - { title: "Защита проекта", kind: project, week: 15 }
+  - { title: "Экзамен", kind: exam, period: session }

@@ -29,3 +29,10 @@ calendar:
     lecture: { match: ["лекци"], activities: [bonus] }
 prep:
   - { before: seminar, title: "Подготовить данные для блока «Визуализация KPI»", effort_h: 0.5 }
+
+# Силлабус: проект ч.1 заочно на неделе 6, промежуточный контроль на неделе 6; приёмка дашборда на неделе 15
+plan:
+  - { title: "Проект, часть 1: заочная сдача", kind: project, week: 6 }
+  - { title: "Проект, часть 2: приёмка дашборда", kind: project, week: 15 }
+  - { title: "Контроль теории", kind: test, week: 15 }
+  - { title: "Дифференцированный зачёт", kind: exam, period: credit }

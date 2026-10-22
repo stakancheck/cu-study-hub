@@ -9,6 +9,7 @@ import { adviseLateDays, findItem, gradeAll, recoverable, whatIf, workItems } fr
 import { digestMarkdown, today, week } from "../core/planner";
 import { loadRules, ruleBySlug } from "../core/rules";
 import { createWorkspace } from "../core/workspace";
+import { planItems, semester, weekOf, ymd } from "../core/plan";
 import { syncAll } from "../sync";
 
 const server = new McpServer({ name: "cu-hub", version: "0.1.0" });
@@ -85,10 +86,14 @@ server.registerTool("board_get", {
 });
 
 server.registerTool("card_move", {
-  description: "Переместить карточку в колонку. LMS-статус «на проверке»/«оценено» всё равно имеет приоритет.",
+  description: "Переместить карточку в колонку. Колонки «На проверке» и «Готово» для задач LMS выставляет сама LMS: их нельзя менять вручную, а ручной перенос открытой задачи в review/done отмечается только локально.",
   inputSchema: { id: z.string(), column: z.enum(colIds) },
 }, async ({ id, column }) => {
-  moveCard(id, column as any);
+  try {
+    moveCard(id, column as any);
+  } catch (e) {
+    return text((e as Error).message);
+  }
   return text(`ok: ${id} → ${column}`);
 });
 
@@ -161,6 +166,15 @@ server.registerTool("workspace_create", {
   const res = await createWorkspace(it.id, { clone });
   moveCard(it.id, "doing");
   return json(res);
+});
+
+server.registerTool("study_plan", {
+  description: "Учебный план: номер текущей недели, контрольные точки курсов (проекты, контрольные, экзамены) с датами из LMS или неделями из силлабуса/хендбука, зачётная неделя, сессия, каникулы, свои отметки.",
+  inputSchema: { from: z.string().optional().describe("YYYY-MM-DD, по умолчанию сегодня"), to: z.string().optional().describe("YYYY-MM-DD, по умолчанию +60 дней") },
+}, async ({ from, to }) => {
+  const f = from ?? ymd(new Date());
+  const t = to ?? ymd(new Date(Date.now() + 60 * 86_400_000));
+  return json({ week: weekOf(), semester: semester(), items: planItems(f, t) });
 });
 
 server.registerTool("recoverable", {

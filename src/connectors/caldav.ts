@@ -1,6 +1,6 @@
 import ICAL from "ical.js";
 import { createDAVClient } from "tsdav";
-import { loadConfig } from "../config";
+import { type CaldavConfig, loadConfig } from "../config";
 import { getDb, setMeta } from "../core/db";
 import { loadRules } from "../core/rules";
 
@@ -21,6 +21,27 @@ function keychainPassword(service: string, account: string): string {
   if (r.exitCode !== 0)
     throw new Error(`Нет пароля в Keychain (service=${service}, account=${account}). См. README, раздел «Календарь».`);
   return r.stdout.toString().trim();
+}
+
+export function hasKeychainPassword(service: string, account: string): boolean {
+  return Bun.spawnSync(["security", "find-generic-password", "-s", service, "-a", account]).exitCode === 0;
+}
+
+/** Stores (or replaces) the app password in the login Keychain. */
+export function setKeychainPassword(service: string, account: string, password: string) {
+  const r = Bun.spawnSync(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w", password]);
+  if (r.exitCode !== 0) throw new Error(`Keychain: ${r.stderr.toString().trim()}`);
+}
+
+/** Connects with the given settings and returns calendar display names. */
+export async function listCalendars(cfg: CaldavConfig): Promise<string[]> {
+  const client = await createDAVClient({
+    serverUrl: cfg.url,
+    credentials: { username: cfg.username, password: keychainPassword(cfg.keychainService, cfg.username) },
+    authMethod: "Basic",
+    defaultAccountType: "caldav",
+  });
+  return (await client.fetchCalendars()).map((c) => String(c.displayName));
 }
 
 export function expandIcs(ics: string, calendar: string, from: Date, to: Date): CalEvent[] {

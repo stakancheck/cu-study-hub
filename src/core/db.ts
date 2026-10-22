@@ -121,6 +121,16 @@ function migrate(d: Database) {
       at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS plan_items (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      course_id INTEGER,
+      start TEXT NOT NULL,           -- YYYY-MM-DD
+      end TEXT NOT NULL,
+      note TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS syllabus_snapshots (
       course_id INTEGER PRIMARY KEY,
       url TEXT,
